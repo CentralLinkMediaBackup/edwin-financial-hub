@@ -136,7 +136,7 @@ export const useStore = create(
 
       // ─── ACCOUNTS ─────────────────────────────────────────────
       accounts: {
-        chaseDebit: 0,
+        chaseDebit: 389.82,
         capitalOneDebit: 0,
         cashApp: 0,
         paypal: 0,
@@ -414,6 +414,14 @@ export const useStore = create(
     }),
     {
       name: 'edwin-financial-hub',
+      version: 2,
+      migrate: (persisted, version) => {
+        // v2: set Chase Debit to 389.82
+        if (version < 2) {
+          return { ...persisted, accounts: { ...persisted.accounts, chaseDebit: 389.82 } }
+        }
+        return persisted
+      },
       partialize: (state) => ({
         theme: state.theme,
         accounts: state.accounts,
