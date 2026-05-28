@@ -155,18 +155,53 @@ export const useStore = create(
       transactions: [],
       addTransaction: (transaction) => {
         const newTx = { ...transaction, id: generateId(), createdAt: new Date().toISOString() }
-        set((state) => ({ transactions: [newTx, ...state.transactions] }))
+        set((state) => {
+          const current = state.accounts[transaction.account] ?? 0
+          const delta = transaction.type === 'in' ? transaction.amount : -transaction.amount
+          return {
+            transactions: [newTx, ...state.transactions],
+            accounts: { ...state.accounts, [transaction.account]: current + delta },
+          }
+        })
         get().addToast('Transaction added', 'success')
         return newTx
       },
       updateTransaction: (id, updates) => {
-        set((state) => ({
-          transactions: state.transactions.map(t => t.id === id ? { ...t, ...updates } : t)
-        }))
+        set((state) => {
+          const old = state.transactions.find(t => t.id === id)
+          const accounts = { ...state.accounts }
+          if (old) {
+            // Reverse the old transaction's effect
+            const oldDelta = old.type === 'in' ? -old.amount : old.amount
+            accounts[old.account] = (accounts[old.account] ?? 0) + oldDelta
+          }
+          // Apply the updated transaction's effect
+          const newAmount = parseFloat(updates.amount ?? old?.amount)
+          const newType = updates.type ?? old?.type
+          const newAccount = updates.account ?? old?.account
+          const newDelta = newType === 'in' ? newAmount : -newAmount
+          accounts[newAccount] = (accounts[newAccount] ?? 0) + newDelta
+          return {
+            transactions: state.transactions.map(t => t.id === id ? { ...t, ...updates } : t),
+            accounts,
+          }
+        })
         get().addToast('Transaction updated', 'success')
       },
       deleteTransaction: (id) => {
-        set((state) => ({ transactions: state.transactions.filter(t => t.id !== id) }))
+        set((state) => {
+          const tx = state.transactions.find(t => t.id === id)
+          const accounts = { ...state.accounts }
+          if (tx) {
+            // Reverse the transaction's effect on the balance
+            const delta = tx.type === 'in' ? -tx.amount : tx.amount
+            accounts[tx.account] = (accounts[tx.account] ?? 0) + delta
+          }
+          return {
+            transactions: state.transactions.filter(t => t.id !== id),
+            accounts,
+          }
+        })
         get().addToast('Transaction deleted', 'success')
       },
 

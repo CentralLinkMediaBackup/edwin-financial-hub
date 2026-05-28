@@ -17,7 +17,7 @@ import {
 const navItems = [
   { path: '/',             icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/calendar',    icon: Calendar,        label: 'Calendar' },
-  { path: '/expenses',    icon: Receipt,         label: 'Expenses Tracker' },
+  { path: '/expenses',    icon: Receipt,         label: 'Transaction Tracker' },
   { path: '/debts',       icon: CreditCard,      label: 'Debts' },
   { path: '/tilt',        icon: Zap,             label: 'TILT' },
   { path: '/earnin',      icon: TrendingUp,      label: 'Earn In' },

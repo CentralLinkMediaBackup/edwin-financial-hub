@@ -264,7 +264,7 @@ export default function ExpensesTracker() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Expenses Tracker</h1>
+          <h1 className="text-2xl font-bold text-white">Transaction Tracker</h1>
           <p className="text-slate-400 text-sm mt-1">{filtered.length} transactions</p>
         </div>
         <div className="flex gap-2">
