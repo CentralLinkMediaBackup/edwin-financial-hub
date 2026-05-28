@@ -613,7 +613,7 @@ export function AIAssistant() {
                 >
                   <div className="flex flex-col gap-0.5 max-w-[85%]">
                     <div
-                      className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                      className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
                         msg.role === 'user'
                           ? 'rounded-br-sm text-white'
                           : 'rounded-bl-sm border border-white/10'
