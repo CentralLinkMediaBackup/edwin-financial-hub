@@ -89,18 +89,20 @@ const GEMINI_TOOLS = [
 ]
 
 // ─── callGemini with function calling ─────────────────────────────────────────
-async function callGemini(messages, systemPrompt, retries = 2) {
+async function callGemini(messages, systemPrompt) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY
   if (!apiKey) throw new Error('NO_API_KEY')
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`
 
-  const contents = messages
+  // Gemini requires conversation to start with a user turn
+  const allContents = messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }],
     }))
+  const contents = allContents[0]?.role === 'model' ? allContents.slice(1) : allContents
 
   const body = {
     system_instruction: { parts: [{ text: systemPrompt }] },
@@ -117,11 +119,10 @@ async function callGemini(messages, systemPrompt, retries = 2) {
 
   if (!res.ok) {
     const errText = await res.text()
-    if (res.status === 429 && retries > 0) {
-      await new Promise(r => setTimeout(r, 3000))
-      return callGemini(messages, systemPrompt, retries - 1)
-    }
-    throw new Error(`API_ERROR:${res.status}:${errText}`)
+    let googleMsg = ''
+    try { googleMsg = JSON.parse(errText)?.error?.message || '' } catch { /* not JSON */ }
+    console.error('Gemini API error:', res.status, googleMsg || errText)
+    throw new Error(`API_ERROR:${res.status}:${googleMsg}`)
   }
 
   const data = await res.json()
@@ -472,14 +473,17 @@ export function AIAssistant() {
       if (err.message === 'NO_API_KEY') {
         errMsg = 'No Gemini API key found. Check your environment configuration.'
       } else if (err.message.startsWith('API_ERROR:')) {
-        const parts = err.message.split(':')
-        const status = parts[1]
+        const rest = err.message.slice('API_ERROR:'.length)
+        const colonIdx = rest.indexOf(':')
+        const status = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest
+        const detail = colonIdx >= 0 ? rest.slice(colonIdx + 1) : ''
         if (status === '429') {
-          errMsg = 'Rate limit reached — please wait 15–20 seconds and try again.'
+          errMsg = detail
+            ? `Quota error: ${detail}`
+            : 'Rate limit hit — check Google Cloud Console → APIs & Services → Quotas for the Generative Language API.'
         } else {
-          errMsg = `API error (${status}). Check console for details.`
+          errMsg = `API error (${status})${detail ? ': ' + detail : ''}. Check browser console.`
         }
-        console.error('Gemini API error:', err.message)
       } else {
         errMsg = `Error: ${err.message}. Check the browser console for details.`
         console.error('Gemini error:', err)
