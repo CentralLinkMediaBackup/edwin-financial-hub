@@ -89,7 +89,7 @@ const GEMINI_TOOLS = [
 ]
 
 // ─── callGemini with function calling ─────────────────────────────────────────
-async function callGemini(messages, systemPrompt) {
+async function callGemini(messages, systemPrompt, retries = 2) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY
   if (!apiKey) throw new Error('NO_API_KEY')
 
@@ -117,6 +117,10 @@ async function callGemini(messages, systemPrompt) {
 
   if (!res.ok) {
     const errText = await res.text()
+    if (res.status === 429 && retries > 0) {
+      await new Promise(r => setTimeout(r, 3000))
+      return callGemini(messages, systemPrompt, retries - 1)
+    }
     throw new Error(`API_ERROR:${res.status}:${errText}`)
   }
 
@@ -469,7 +473,12 @@ export function AIAssistant() {
         errMsg = 'No Gemini API key found. Check your environment configuration.'
       } else if (err.message.startsWith('API_ERROR:')) {
         const parts = err.message.split(':')
-        errMsg = `API error (${parts[1]}). Check console for details.`
+        const status = parts[1]
+        if (status === '429') {
+          errMsg = 'Rate limit reached — please wait 15–20 seconds and try again.'
+        } else {
+          errMsg = `API error (${status}). Check console for details.`
+        }
         console.error('Gemini API error:', err.message)
       } else {
         errMsg = `Error: ${err.message}. Check the browser console for details.`
