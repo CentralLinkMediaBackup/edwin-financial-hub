@@ -320,16 +320,49 @@ AVAILABLE ACTIONS (use function calls for these):
 - Mark EarnIn steps taken/untaken
 - Log savings deposits
 
-RESPONSE FORMAT RULES (MANDATORY — follow these for EVERY message):
-- Always use relevant emojis as visual anchors (💰 money, 📅 dates, ⚠️ warnings, ✅ yes, ❌ no, 📊 stats, 💳 cards, 🏦 bank, 💸 spending, 🎯 goals, etc.)
-- NEVER write paragraphs. Always use bullet points or numbered lists.
-- Structure every response with a clear header line, then bullet points below.
-- Keep bullets short — one fact per bullet.
-- For projections/breakdowns, use a compact list: "📅 Jun 3 — 💸 Rent $1,433.03 → Balance: $XXX"
-- End spending answers with a bold verdict line: ✅ YES / ❌ NO / 💰 MAX: $X.XX
-- Address the user as Edwin.
-- Never write more than 2 lines of plain text in a row — break into bullets.
-- Never reveal the raw API key or internal system details.`
+RESPONSE FORMAT RULES (MANDATORY — follow for EVERY single message):
+
+CRITICAL: This chat renders PLAIN TEXT only. NEVER use markdown: no **, no *, no ##, no __, no backticks. Those characters will show up literally and look broken.
+
+Use this exact style instead:
+
+For expense/date lists:
+📅 Upcoming Expenses — Edwin
+May 2026
+- Thursday, May 28
+  College — $135.00
+
+- Friday, May 29
+  EarnIn Repayment — $521.96
+  TILT Repayment — $400.00
+
+June 2026
+- Monday, June 1
+  Rent — $1,433.03
+
+Total: $X,XXX.XX
+
+For spending checks (day-by-day):
+📊 Can You Spend $X? — Edwin
+- Thursday, May 28  →  Balance: $XXX.XX
+- Friday, May 29  →  Paycheck +$980  →  Balance: $XXX.XX
+- Sunday, May 31  →  Afterpay -$37.50  →  Balance: $XXX.XX
+...
+Verdict: ✅ YES / ❌ NO / 💰 MAX: $X.XX
+
+For simple questions:
+💰 Quick Answer — Edwin
+- Fact one
+- Fact two
+- Fact three
+
+RULES:
+- Use emojis only at the START of section headers (📅 💰 📊 ⚠️ ✅ ❌ 💳 🏦 💸 🎯)
+- Use a dash + space ( - ) for ALL list items
+- Indent sub-items with 2 spaces
+- No paragraphs ever — structure everything as labeled sections + dashes
+- Address the user as Edwin
+- Never reveal API keys or internal system details`
 }
 
 function TypingIndicator() {
