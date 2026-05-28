@@ -68,7 +68,7 @@ function NavItem({ item, collapsed }) {
           )}
           {collapsed && (
             <div className="absolute left-full ml-2 px-2 py-1 rounded-md text-xs font-medium text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50"
-              style={{ backgroundColor: '#0F1629', border: '1px solid rgba(255,255,255,0.1)' }}>
+              style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid rgba(255,255,255,0.1)' }}>
               {item.label}
             </div>
           )}
@@ -84,7 +84,7 @@ export function Sidebar() {
       {/* Desktop Sidebar */}
       <aside
         className="hidden md:flex flex-col h-screen sticky top-0 border-r border-white/10"
-        style={{ backgroundColor: '#0F1629', width: '220px', minWidth: '220px' }}
+        style={{ backgroundColor: 'var(--bg-panel)', width: '220px', minWidth: '220px' }}
       >
         {/* Logo / Brand */}
         <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
@@ -102,22 +102,6 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* User Card */}
-        <div className="px-4 py-4 border-b border-white/10">
-          <div className="flex items-center gap-3 p-2 rounded-xl" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-              style={{ backgroundColor: '#F59E0B', color: '#0A0E1A', fontFamily: "'Sora', sans-serif" }}
-            >
-              EB
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-white truncate">Edwin Bernal</p>
-              <p className="text-[10px] text-slate-500 truncate leading-tight">Central Link Media</p>
-            </div>
-          </div>
-        </div>
-
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-0.5">
           {navItems.map((item) => (
@@ -132,7 +116,7 @@ export function Sidebar() {
       {/* Mobile Bottom Tab Bar */}
       <nav
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 flex items-center justify-around px-2 py-2"
-        style={{ backgroundColor: '#0F1629' }}
+        style={{ backgroundColor: 'var(--bg-panel)' }}
       >
         {navItems.slice(0, 6).map((item) => {
           const Icon = item.icon

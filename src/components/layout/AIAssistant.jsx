@@ -14,11 +14,84 @@ const SUGGESTION_CHIPS = [
   'Am I safe this week?',
 ]
 
+// ─── Gemini Function Declarations ─────────────────────────────────────────────
+const GEMINI_TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: 'log_transaction',
+        description: 'Log a financial transaction (expense or income) to the expenses tracker',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            amount:   { type: 'NUMBER', description: 'Amount in dollars (positive number)' },
+            type:     { type: 'STRING', description: '"in" for income, "out" for expense' },
+            category: { type: 'STRING', description: 'Category: Food, Bills, Transport, Entertainment, Health, Other' },
+            note:     { type: 'STRING', description: 'Description of the transaction' },
+            account:  { type: 'STRING', description: 'Account: chaseDebit, capitalOneDebit, cashApp, paypal' },
+            date:     { type: 'STRING', description: 'Date in YYYY-MM-DD format. Use today if not specified.' },
+          },
+          required: ['amount', 'type', 'category'],
+        },
+      },
+      {
+        name: 'update_account_balance',
+        description: "Update the balance of one of the user's accounts",
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            account: { type: 'STRING', description: 'Account key: chaseDebit, capitalOneDebit, cashApp, paypal' },
+            balance: { type: 'NUMBER', description: 'New balance in dollars' },
+          },
+          required: ['account', 'balance'],
+        },
+      },
+      {
+        name: 'log_one_time_income',
+        description: 'Log a one-time income payment (bonus, client payment, etc.)',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            amount: { type: 'NUMBER', description: 'Income amount in dollars' },
+            source: { type: 'STRING', description: 'Source: CLM Client Payment, Gift, Tax Return, Side Income, Other' },
+            note:   { type: 'STRING', description: 'Description' },
+            date:   { type: 'STRING', description: 'Date YYYY-MM-DD' },
+          },
+          required: ['amount', 'source'],
+        },
+      },
+      {
+        name: 'mark_earnin_step',
+        description: 'Mark an Earn In step as taken or untaken for the current cycle',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            day:   { type: 'STRING',  description: 'Day key: fri, sat, sun, mon' },
+            taken: { type: 'BOOLEAN', description: 'true to mark as taken, false to unmark' },
+          },
+          required: ['day', 'taken'],
+        },
+      },
+      {
+        name: 'log_savings_deposit',
+        description: 'Log a deposit to a savings goal',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            goalId: { type: 'STRING', description: 'ID of the savings goal' },
+            amount: { type: 'NUMBER', description: 'Amount to deposit' },
+          },
+          required: ['goalId', 'amount'],
+        },
+      },
+    ],
+  },
+]
+
+// ─── callGemini with function calling ─────────────────────────────────────────
 async function callGemini(messages, systemPrompt) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-  if (!apiKey) {
-    throw new Error('No Gemini API key configured. Add VITE_GEMINI_API_KEY to your .env file.')
-  }
+  if (!apiKey) throw new Error('NO_API_KEY')
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`
 
@@ -32,70 +105,169 @@ async function callGemini(messages, systemPrompt) {
   const body = {
     system_instruction: { parts: [{ text: systemPrompt }] },
     contents,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 400,
-    },
+    tools: GEMINI_TOOLS,
+    generationConfig: { temperature: 0.5, maxOutputTokens: 800 },
   }
 
-  const response = await fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
 
-  if (!response.ok) {
-    const err = await response.text()
-    throw new Error(`Gemini API error: ${err}`)
+  if (!res.ok) {
+    const errText = await res.text()
+    throw new Error(`API_ERROR:${res.status}:${errText}`)
   }
 
-  const data = await response.json()
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.'
+  const data = await res.json()
+  const candidate = data.candidates?.[0]
+  if (!candidate) throw new Error('NO_CANDIDATE')
+
+  const part = candidate.content?.parts?.[0]
+  if (part?.functionCall) {
+    return { functionCall: part.functionCall }
+  }
+
+  return { text: part?.text || 'I could not generate a response.' }
 }
 
+// ─── buildSystemPrompt ────────────────────────────────────────────────────────
 function buildSystemPrompt(store) {
-  const today = format(new Date(), 'EEEE, MMMM d yyyy')
-  const totalBalance = Object.values(store.accounts).reduce((a, b) => a + b, 0)
+  const today = new Date()
+  const todayStr = format(today, 'EEEE, MMMM d yyyy')
   const accounts = store.accounts
+  const totalBalance = Object.values(accounts).reduce((a, b) => a + b, 0)
 
-  // Bills
-  const activeBills = store.bills.filter(b => b.isActive)
-  const monthlyBills = activeBills.filter(b => b.frequency === 'monthly').reduce((s, b) => s + b.amount, 0)
-  const billsList = activeBills.slice(0, 10).map(b => `${b.name}: ${formatCurrency(b.amount)} due ${b.dueDay ? `on ${b.dueDay}th` : 'flexible'}`).join('; ')
+  // Bills — all active
+  const activeBills = (store.bills || []).filter(b => b.isActive)
+  const monthlyTotal = activeBills.filter(b => b.frequency === 'monthly').reduce((s, b) => s + b.amount, 0)
+  const billsList = activeBills.map(b =>
+    `  - ${b.name}: $${b.amount.toFixed(2)} due ${b.dueDay ? `on ${b.dueDay}` : 'flexible'}`
+  ).join('\n')
 
-  // Paychecks
-  const todayDate = new Date()
-  const upcomingPaychecks = store.paychecks
-    .filter(p => parseISO(p.date) >= todayDate)
+  // Upcoming paychecks (next 3)
+  const upcomingPaychecks = (store.paychecks || [])
+    .filter(p => !p.isOneTime && parseISO(p.date) >= today)
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
-  const nextPaycheck = upcomingPaychecks[0]
+  const paycheckList = upcomingPaychecks.map(p =>
+    `  - ${format(parseISO(p.date), 'EEE MMM d')}: $${p.amount.toFixed(2)} from ${p.source || 'Employment'}`
+  ).join('\n') || '  - None scheduled'
 
   // TILT
-  const activeTilt = store.tiltLogs.find(l => l.status === 'active')
+  const activeTilt = (store.tiltLogs || []).find(l => l.status === 'active')
   const tiltStatus = activeTilt
     ? `ACTIVE — $${activeTilt.amountUsed} used, repayment due ${activeTilt.repaymentDate}`
     : 'CLEAR (no active advances)'
 
   // Earn In
-  const activeEarnIn = store.earnInLogs.find(l => l.status === 'active')
+  const activeEarnIn = (store.earnInLogs || []).find(l => l.status === 'active')
   const earnInStatus = activeEarnIn
-    ? `Active cycle started ${activeEarnIn.cycleStartDate}. Fri: ${activeEarnIn.fri_taken ? 'taken' : 'not taken'}, Sat: ${activeEarnIn.sat_taken ? 'taken' : 'not taken'}, Sun: ${activeEarnIn.sun_taken ? 'taken' : 'not taken'}, Mon: ${activeEarnIn.mon_taken ? 'taken' : 'not taken'}. Repayment: $${activeEarnIn.repaymentAmount}`
+    ? `Active cycle (started ${activeEarnIn.cycleStartDate}).
+  Steps: Fri: ${activeEarnIn.fri_taken ? `TAKEN ($${activeEarnIn.amounts?.fri ?? 155.99})` : 'not taken'}, Sat: ${activeEarnIn.sat_taken ? `TAKEN ($${activeEarnIn.amounts?.sat ?? 155.99})` : 'not taken'}, Sun: ${activeEarnIn.sun_taken ? `TAKEN ($${activeEarnIn.amounts?.sun ?? 155.99})` : 'not taken'}, Mon: ${activeEarnIn.mon_taken ? `TAKEN ($${activeEarnIn.amounts?.mon ?? 53.99})` : 'not taken'}.
+  Repayment: $${activeEarnIn.repaymentAmount || 521.96}`
     : 'No active cycle'
 
-  // Savings
-  const totalSaved = store.savingsGoals.reduce((s, g) => s + g.currentAmount, 0)
-  const totalSavingsTarget = store.savingsGoals.reduce((s, g) => s + g.targetAmount, 0)
+  // Afterpay
+  const afterpayLines = (store.afterpayItems || []).flatMap(item =>
+    item.payments
+      .filter(p => p.status !== 'paid')
+      .map(p => `  - ${item.name} #${p.number}: $${p.amount.toFixed(2)} due ${p.dueDate}`)
+  ).join('\n') || '  - None'
 
   // Debts
-  const totalDebt = store.debts.reduce((s, d) => s + d.totalBalance, 0)
+  const totalDebt = (store.debts || []).reduce((s, d) => s + d.totalBalance, 0)
 
-  // Projected balance (simple: balance + next paycheck - upcoming bills this week)
-  const weeklyBills = monthlyBills / 4
-  const projectedBalance = totalBalance + (nextPaycheck?.amount || 0) - weeklyBills
+  // Savings
+  const totalSaved = (store.savingsGoals || []).reduce((s, g) => s + (g.currentAmount || 0), 0)
+
+  // ── Day-by-day projection for next 14 days ────────────────────────────────
+  // Build a map: date string -> list of {label, amount (+/-)}
+  const eventMap = {}
+  const addEvent = (dateStr, label, amount) => {
+    if (!eventMap[dateStr]) eventMap[dateStr] = []
+    eventMap[dateStr].push({ label, amount })
+  }
+
+  // EarnIn steps (days relative to cycle start)
+  if (activeEarnIn) {
+    const daysConfig = [
+      { key: 'fri', offset: 0, amount: activeEarnIn.amounts?.fri ?? 155.99, takenKey: 'fri_taken' },
+      { key: 'sat', offset: 1, amount: activeEarnIn.amounts?.sat ?? 155.99, takenKey: 'sat_taken' },
+      { key: 'sun', offset: 2, amount: activeEarnIn.amounts?.sun ?? 155.99, takenKey: 'sun_taken' },
+      { key: 'mon', offset: 3, amount: activeEarnIn.amounts?.mon ?? 53.99,  takenKey: 'mon_taken' },
+    ]
+    const cycleStart = parseISO(activeEarnIn.cycleStartDate)
+    daysConfig.forEach(d => {
+      if (activeEarnIn[d.takenKey]) {
+        const dateStr = format(addDays(cycleStart, d.offset), 'yyyy-MM-dd')
+        addEvent(dateStr, `EarnIn ${d.key.charAt(0).toUpperCase() + d.key.slice(1)} withdrawal`, +d.amount)
+      }
+    })
+    // Repayment date (7 days after cycle start)
+    const repayDate = format(addDays(cycleStart, 7), 'yyyy-MM-dd')
+    addEvent(repayDate, 'EarnIn Repayment', -(activeEarnIn.repaymentAmount || 521.96))
+  }
+
+  // TILT repayment
+  if (activeTilt) {
+    addEvent(activeTilt.repaymentDate, 'TILT Repayment', -activeTilt.amountUsed)
+  }
+
+  // Paychecks
+  upcomingPaychecks.forEach(p => {
+    addEvent(p.date, `Paycheck (${p.source || 'Employment'})`, +p.amount)
+  })
+
+  // Bills for current and next month
+  const currentMonth = today.getMonth()
+  const currentYear = today.getFullYear()
+  activeBills.filter(b => b.dueDay).forEach(b => {
+    // This month
+    const d1 = new Date(currentYear, currentMonth, b.dueDay)
+    const d1Str = format(d1, 'yyyy-MM-dd')
+    addEvent(d1Str, `Bill: ${b.name}`, -b.amount)
+    // Next month
+    const d2 = new Date(currentYear, currentMonth + 1, b.dueDay)
+    const d2Str = format(d2, 'yyyy-MM-dd')
+    addEvent(d2Str, `Bill: ${b.name}`, -b.amount)
+  })
+
+  // Afterpay upcoming payments
+  ;(store.afterpayItems || []).forEach(item => {
+    item.payments.filter(p => p.status !== 'paid').forEach(p => {
+      addEvent(p.dueDate, `Afterpay ${item.name} #${p.number}`, -p.amount)
+    })
+  })
+
+  // Build projection lines for next 14 days
+  let runningBalance = totalBalance
+  const projectionLines = []
+  for (let i = 0; i < 14; i++) {
+    const d = addDays(today, i)
+    const dateStr = format(d, 'yyyy-MM-dd')
+    const label = format(d, 'MMM d (EEE)')
+    const events = eventMap[dateStr] || []
+    let dayDelta = 0
+    const eventDescs = events.map(e => {
+      dayDelta += e.amount
+      return `${e.amount >= 0 ? '+' : ''}$${Math.abs(e.amount).toFixed(2)} ${e.label}`
+    })
+    runningBalance += dayDelta
+    if (i === 0) {
+      projectionLines.push(`  ${label}: Starting $${totalBalance.toFixed(2)}${eventDescs.length ? `, ${eventDescs.join(', ')} → Balance: $${runningBalance.toFixed(2)}` : ''}`)
+    } else {
+      projectionLines.push(
+        eventDescs.length
+          ? `  ${label}: ${eventDescs.join(', ')} → Balance: $${runningBalance.toFixed(2)}`
+          : `  ${label}: $${runningBalance.toFixed(2)}`
+      )
+    }
+  }
 
   return `You are Edwin Bernal's personal AI financial assistant inside his Financial Hub app.
-Today is ${today}.
+Today is ${todayStr}.
 
 FINANCIAL SNAPSHOT:
 - Total Balance: ${formatCurrency(totalBalance)}
@@ -103,25 +275,50 @@ FINANCIAL SNAPSHOT:
   - Capital One Debit: ${formatCurrency(accounts.capitalOneDebit)}
   - Cash App: ${formatCurrency(accounts.cashApp)}
   - PayPal: ${formatCurrency(accounts.paypal)}
-- Monthly Bills Total: ${formatCurrency(monthlyBills)}
-- Bills: ${billsList}
+- Monthly Bills Total: ${formatCurrency(monthlyTotal)}
 - Total Debt: ${formatCurrency(totalDebt)}
-- Savings: ${formatCurrency(totalSaved)} / ${formatCurrency(totalSavingsTarget)} target
+- Savings: ${formatCurrency(totalSaved)}
 
-PAYCHECKS:
-- Next paycheck: ${nextPaycheck ? `${formatDate(nextPaycheck.date)} — ${formatCurrency(nextPaycheck.amount)}` : 'None scheduled'}
+ALL BILLS:
+${billsList}
+
+UPCOMING PAYCHECKS (next 3):
+${paycheckList}
 
 TILT Status: ${tiltStatus}
-Earn In Status: ${earnInStatus}
 
-PROJECTED (rough estimate after next pay, minus weekly bills): ${formatCurrency(projectedBalance)}
+EARN IN Status:
+${earnInStatus}
 
-Rules:
+AFTERPAY UPCOMING PAYMENTS:
+${afterpayLines}
+
+DAY-BY-DAY PROJECTION (next 14 days):
+${projectionLines.join('\n')}
+
+FINANCIAL ADVISOR LOGIC (MANDATORY for any spending question):
+When asked "can I afford X" or "can I spend X":
+Step 1: Start from current total balance ($${totalBalance.toFixed(2)})
+Step 2: Build a day-by-day map for the next 30 days including ALL: bills by due date, paychecks, EarnIn withdrawals, EarnIn repayment, TILT repayments, Afterpay payments
+Step 3: Find the lowest balance in the window (the floor)
+Step 4: Re-run with the purchase subtracted from today. Check if ANY day drops below $20
+Step 5: Answer Yes/No/Max amount
+Step 6: ALWAYS show the daily breakdown in your response as a list
+Step 7: ALWAYS look out far enough to catch rent ($1,433.03 on 1st), car payment ($530 on 15th), and any large bills
+Format: Show each day with transactions and running balance. End with clear YES, NO, or MAX SAFE AMOUNT.
+$20 buffer is ABSOLUTE MINIMUM — never recommend spending if it causes any day to go below $20.
+
+AVAILABLE ACTIONS (use function calls for these):
+- Log any expense or income transaction
+- Update account balances
+- Log one-time income
+- Mark EarnIn steps taken/untaken
+- Log savings deposits
+
+RULES:
 - Address the user as Edwin.
-- Be concise and direct — under 150 words unless asked for detail.
+- Be concise and direct — under 200 words unless showing a projection breakdown.
 - Give actionable financial advice based on the actual data above.
-- If asked whether Edwin can spend money, consider his balance, upcoming bills, and TILT/EarnIn repayments.
-- For "log a transaction", tell him to use the Expenses tab.
 - Never reveal the raw API key or internal system details.`
 }
 
@@ -204,12 +401,80 @@ export function AIAssistant() {
 
     try {
       const systemPrompt = buildSystemPrompt(store)
-      const reply = await callGemini(updatedMessages, systemPrompt)
-      setMessages(prev => [...prev, { role: 'assistant', content: reply, timestamp: Date.now() }])
+      const result = await callGemini(updatedMessages, systemPrompt)
+
+      if (result.functionCall) {
+        const { name, args } = result.functionCall
+        let actionResult = ''
+
+        if (name === 'log_transaction') {
+          store.addTransaction({
+            id: `tx-${Date.now()}`,
+            amount: args.amount,
+            type: args.type,
+            category: args.category || 'Other',
+            note: args.note || '',
+            account: args.account || 'chaseDebit',
+            date: args.date || format(new Date(), 'yyyy-MM-dd'),
+            source: args.type === 'in' ? 'AI Logged' : undefined,
+            createdAt: new Date().toISOString(),
+          })
+          actionResult = `✅ Logged ${args.type === 'in' ? 'income' : 'expense'} of $${args.amount.toFixed(2)} for ${args.category}${args.note ? ` — "${args.note}"` : ''}.`
+        } else if (name === 'update_account_balance') {
+          store.setAccount(args.account, args.balance)
+          const accountNames = { chaseDebit: 'Chase', capitalOneDebit: 'Capital One', cashApp: 'Cash App', paypal: 'PayPal' }
+          actionResult = `✅ Updated ${accountNames[args.account] || args.account} balance to $${args.balance.toFixed(2)}.`
+        } else if (name === 'log_one_time_income') {
+          store.addPaycheck({
+            id: `paycheck-ot-${Date.now()}`,
+            amount: args.amount,
+            date: args.date || format(new Date(), 'yyyy-MM-dd'),
+            source: args.source,
+            note: args.note || '',
+            isOneTime: true,
+            received: true,
+          })
+          actionResult = `✅ Logged $${args.amount.toFixed(2)} from "${args.source}"${args.note ? ` — ${args.note}` : ''}.`
+        } else if (name === 'mark_earnin_step') {
+          const activeLog = store.earnInLogs.find(l => l.status === 'active')
+          if (activeLog) {
+            store.updateEarnInLog(activeLog.id, { [`${args.day}_taken`]: args.taken })
+            actionResult = `✅ Marked Earn In ${args.day.charAt(0).toUpperCase() + args.day.slice(1)} as ${args.taken ? 'taken' : 'not taken'}.`
+          } else {
+            actionResult = '⚠️ No active Earn In cycle found.'
+          }
+        } else if (name === 'log_savings_deposit') {
+          const goal = (store.savingsGoals || []).find(g => g.id === args.goalId)
+          if (goal) {
+            const deposit = { id: `dep-${Date.now()}`, amount: args.amount, date: format(new Date(), 'yyyy-MM-dd') }
+            store.updateSavingsGoal(goal.id, {
+              currentAmount: (goal.currentAmount || 0) + args.amount,
+              deposits: [...(goal.deposits || []), deposit],
+            })
+            actionResult = `✅ Added $${args.amount.toFixed(2)} deposit to "${goal.name}".`
+          } else {
+            actionResult = '⚠️ Savings goal not found.'
+          }
+        } else {
+          actionResult = `✅ Action "${name}" executed.`
+        }
+
+        setMessages(prev => [...prev, { role: 'assistant', content: actionResult, timestamp: Date.now() }])
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: result.text, timestamp: Date.now() }])
+      }
     } catch (err) {
-      const errMsg = err.message.includes('No Gemini API key')
-        ? 'No API key configured. Add VITE_GEMINI_API_KEY to your .env file to enable AI responses.'
-        : "Sorry, I'm having trouble connecting right now. Please try again."
+      let errMsg
+      if (err.message === 'NO_API_KEY') {
+        errMsg = 'No Gemini API key found. Check your environment configuration.'
+      } else if (err.message.startsWith('API_ERROR:')) {
+        const parts = err.message.split(':')
+        errMsg = `API error (${parts[1]}). Check console for details.`
+        console.error('Gemini API error:', err.message)
+      } else {
+        errMsg = `Error: ${err.message}. Check the browser console for details.`
+        console.error('Gemini error:', err)
+      }
       setMessages(prev => [...prev, { role: 'assistant', content: errMsg, timestamp: Date.now() }])
     } finally {
       setIsLoading(false)
@@ -245,12 +510,12 @@ export function AIAssistant() {
             exit={{ x: '100%', opacity: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             className="fixed top-0 right-0 bottom-0 z-50 w-[400px] flex flex-col border-l border-white/10 shadow-2xl"
-            style={{ backgroundColor: '#0B1120' }}
+            style={{ backgroundColor: 'var(--bg-chat)' }}
           >
             {/* Header */}
             <div
               className="flex items-center justify-between px-4 py-4 border-b border-white/10 flex-shrink-0"
-              style={{ backgroundColor: 'rgba(245, 158, 11, 0.06)' }}
+              style={{ backgroundColor: 'var(--bg-card)' }}
             >
               <div className="flex items-center gap-3">
                 <div className="relative">
@@ -264,7 +529,7 @@ export function AIAssistant() {
                   />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-white">Gemini AI</p>
+                  <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Gemini AI</p>
                   <p className="text-xs text-slate-500">Your financial assistant</p>
                 </div>
               </div>
@@ -300,12 +565,13 @@ export function AIAssistant() {
                       className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
                         msg.role === 'user'
                           ? 'rounded-br-sm text-white'
-                          : 'rounded-bl-sm text-slate-200 border border-white/10'
+                          : 'rounded-bl-sm border border-white/10'
                       }`}
                       style={{
                         backgroundColor: msg.role === 'user'
                           ? 'rgba(245, 158, 11, 0.85)'
-                          : 'rgba(255, 255, 255, 0.06)',
+                          : 'var(--bg-card)',
+                        color: msg.role === 'user' ? 'white' : 'var(--color-text)',
                       }}
                     >
                       {msg.content}
@@ -323,7 +589,7 @@ export function AIAssistant() {
                 <div className="flex justify-start">
                   <div
                     className="rounded-2xl rounded-bl-sm border border-white/10"
-                    style={{ backgroundColor: 'rgba(255, 255, 255, 0.06)' }}
+                    style={{ backgroundColor: 'var(--bg-card)' }}
                   >
                     <TypingIndicator />
                   </div>
@@ -361,8 +627,8 @@ export function AIAssistant() {
               <div
                 className="flex gap-2 items-center rounded-xl px-3 py-2.5"
                 style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.07)',
-                  border: '1px solid rgba(255,255,255,0.1)',
+                  backgroundColor: 'var(--bg-input)',
+                  border: '1px solid var(--color-border)',
                 }}
               >
                 <button
@@ -379,7 +645,8 @@ export function AIAssistant() {
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask about your finances..."
-                  className="flex-1 bg-transparent text-sm text-white placeholder-slate-500 outline-none"
+                  className="flex-1 bg-transparent text-sm placeholder-slate-500 outline-none"
+                  style={{ color: 'var(--color-text)' }}
                   disabled={isLoading}
                 />
                 <button

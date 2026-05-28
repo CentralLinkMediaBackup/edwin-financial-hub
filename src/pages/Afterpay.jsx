@@ -18,10 +18,17 @@ function generatePaymentSchedule(totalAmount, purchaseDate) {
 
 function PaymentStep({ payment, index }) {
   const statusColors = {
-    paid: 'border-emerald-500/40 bg-emerald-500/10',
+    paid:     'border-emerald-500/40 bg-emerald-500/10',
     upcoming: 'border-amber-500/40 bg-amber-500/10',
+    final:    'border-blue-500/40 bg-blue-500/10',
   }
   const defaultColor = 'border-white/10 bg-white/5'
+
+  const statusLabel =
+    payment.status === 'paid'     ? <span className="text-xs font-medium text-emerald-400">PAID ✓</span>
+    : payment.status === 'final'  ? <span className="text-xs font-medium text-blue-400">FINAL</span>
+    : payment.label === 'FINAL'   ? <span className="text-xs font-medium text-blue-400">FINAL</span>
+    :                               <span className="text-xs font-medium text-amber-400">UPCOMING</span>
 
   return (
     <motion.div
@@ -33,8 +40,8 @@ function PaymentStep({ payment, index }) {
       <div>
         {payment.status === 'paid' ? (
           <CheckCircle2 size={20} className="text-emerald-400" />
-        ) : payment.status === 'upcoming' ? (
-          <Clock size={20} className="text-amber-400" />
+        ) : payment.status === 'upcoming' || payment.status === 'final' ? (
+          <Clock size={20} className={payment.status === 'final' ? 'text-blue-400' : 'text-amber-400'} />
         ) : (
           <div className="w-5 h-5 rounded-full border-2 border-slate-600" />
         )}
@@ -42,26 +49,17 @@ function PaymentStep({ payment, index }) {
       <p className="text-xs font-bold text-white">#{payment.number}</p>
       <p className="text-xs text-slate-400">{formatDate(payment.dueDate)}</p>
       <p className="text-sm font-bold font-mono text-amber-400">{formatCurrency(payment.amount)}</p>
-      {payment.label && (
-        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-          {payment.label}
-        </span>
-      )}
-      <span className={`text-xs font-medium ${
-        payment.status === 'paid' ? 'text-emerald-400' : payment.status === 'upcoming' ? 'text-amber-400' : 'text-slate-500'
-      }`}>
-        {payment.status === 'paid' ? 'Paid' : payment.status === 'upcoming' ? 'Due Soon' : 'Upcoming'}
-      </span>
+      {statusLabel}
     </motion.div>
   )
 }
 
-function AfterpayCard({ item, onMarkPaid, onEdit, onDelete }) {
+function AfterpayCard({ item, onMarkPaid, onUnmark, onEdit, onDelete }) {
   const paidCount = item.payments.filter(p => p.status === 'paid').length
   const totalPaid = item.payments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0)
   const totalRemaining = item.totalAmount - totalPaid
   const progressPct = (totalPaid / item.totalAmount) * 100
-  const upcomingPayment = item.payments.find(p => p.status === 'upcoming')
+  const upcomingPayment = item.payments.find(p => p.status !== 'paid')
   const isComplete = paidCount === item.payments.length
 
   return (
@@ -120,13 +118,32 @@ function AfterpayCard({ item, onMarkPaid, onEdit, onDelete }) {
         </div>
       </div>
 
-      {/* CTA */}
-      {!isComplete && (
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-slate-400">Remaining</p>
-            <p className="text-base font-bold font-mono text-red-400">{formatCurrency(totalRemaining)}</p>
-          </div>
+      {/* CTA row — mark paid / unmark buttons */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          {!isComplete && (
+            <>
+              <p className="text-xs text-slate-400">Remaining</p>
+              <p className="text-base font-bold font-mono text-red-400">{formatCurrency(totalRemaining)}</p>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Unmark button — for the most recently paid payment */}
+          {paidCount > 0 && (
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => {
+                const lastPaid = [...item.payments].reverse().find(p => p.status === 'paid')
+                if (lastPaid) onUnmark(item.id, lastPaid.id)
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-400 bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+            >
+              Unmark #{[...item.payments].reverse().find(p => p.status === 'paid')?.number}
+            </motion.button>
+          )}
+          {/* Mark next paid */}
           {upcomingPayment && (
             <motion.button
               whileHover={{ scale: 1.03 }}
@@ -138,7 +155,7 @@ function AfterpayCard({ item, onMarkPaid, onEdit, onDelete }) {
             </motion.button>
           )}
         </div>
-      )}
+      </div>
     </motion.div>
   )
 }
@@ -309,6 +326,7 @@ export default function Afterpay() {
   const updateAfterpayItem = useStore(s => s.updateAfterpayItem)
   const deleteAfterpayItem = useStore(s => s.deleteAfterpayItem)
   const markAfterpayPayment = useStore(s => s.markAfterpayPayment)
+  const unmarkAfterpayPayment = useStore(s => s.unmarkAfterpayPayment)
   const addToast = useStore(s => s.addToast)
 
   const [showAdd, setShowAdd] = useState(false)
@@ -366,6 +384,7 @@ export default function Afterpay() {
               key={item.id}
               item={item}
               onMarkPaid={markAfterpayPayment}
+              onUnmark={unmarkAfterpayPayment}
               onEdit={() => setEditItem(item)}
               onDelete={() => {
                 if (deleteConfirm === item.id) handleDelete(item.id)
@@ -401,7 +420,8 @@ export default function Afterpay() {
                     <AfterpayCard
                       key={item.id}
                       item={item}
-                      onMarkPaid={() => {}}
+                      onMarkPaid={markAfterpayPayment}
+                      onUnmark={unmarkAfterpayPayment}
                       onEdit={() => setEditItem(item)}
                       onDelete={() => handleDelete(item.id)}
                     />

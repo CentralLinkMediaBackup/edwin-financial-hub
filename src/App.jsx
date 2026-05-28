@@ -46,6 +46,7 @@ export default function App() {
     const root = document.documentElement
     root.classList.toggle('dark', theme === 'dark')
     root.classList.toggle('light', theme === 'light')
+    document.body.style.backgroundColor = theme === 'light' ? '#F1F5F9' : '#0A0E1A'
   }, [theme])
 
   return (

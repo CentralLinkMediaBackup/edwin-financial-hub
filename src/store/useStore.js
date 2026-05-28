@@ -14,7 +14,7 @@ function generatePaychecks() {
       id: `paycheck-${i + 1}`,
       date: format(date, 'yyyy-MM-dd'),
       amount: 980,
-      source: 'Employment',
+      source: 'Prosperity Fire Protection, LLC',
       account: 'chaseDebit',
       note: 'Weekly paycheck',
       received: i === 0, // first one received
@@ -56,9 +56,9 @@ const defaultBills = [
 ]
 
 const defaultDebts = [
-  { id: 'debt-1', name: 'Chase Credit Card',        totalBalance: 0, minimumPayment: 40,  apr: 0, paymentHistory: [] },
-  { id: 'debt-2', name: 'Capital One Credit Card',  totalBalance: 0, minimumPayment: 61,  apr: 0, paymentHistory: [] },
-  { id: 'debt-3', name: 'College',                   totalBalance: 0, minimumPayment: 135, apr: 0, paymentHistory: [] },
+  { id: 'debt-1', name: 'Chase Credit Card',       totalBalance: 570.58,   minimumPayment: 40,  apr: 0,     paymentHistory: [] },
+  { id: 'debt-2', name: 'Capital One Credit Card', totalBalance: 2102.40,  minimumPayment: 61,  apr: 24.49, paymentHistory: [] },
+  { id: 'debt-3', name: 'College',                 totalBalance: 2695.12,  minimumPayment: 135, apr: 0,     paymentHistory: [] },
 ]
 
 const defaultAfterPayItems = [
@@ -98,7 +98,7 @@ const defaultEarnInLogs = [
     sat_taken: false,
     sun_taken: false,
     mon_taken: false,
-    amounts: { fri: 155.99, sat: 155.99, sun: 105.99, mon: 53.99 },
+    amounts: { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 },
     repaymentAmount: 521.96,
     status: 'active',
   },
@@ -288,6 +288,25 @@ export const useStore = create(
         }))
         get().addToast('Afterpay payment marked as paid', 'success')
       },
+      unmarkAfterpayPayment: (itemId, paymentId) => {
+        set((state) => ({
+          afterpayItems: state.afterpayItems.map(item => {
+            if (item.id !== itemId) return item
+            const payments = item.payments
+            const idx = payments.findIndex(p => p.id === paymentId)
+            const isLast = idx === payments.length - 1
+            return {
+              ...item,
+              payments: payments.map((p, i) =>
+                p.id === paymentId
+                  ? { ...p, status: isLast ? 'final' : 'upcoming', paidDate: null }
+                  : p
+              )
+            }
+          })
+        }))
+        get().addToast('Afterpay payment unmarked', 'success')
+      },
 
       // ─── DEBTS ────────────────────────────────────────────────
       debts: defaultDebts,
@@ -352,7 +371,7 @@ export const useStore = create(
           repaymentAmount: 521.96,
           fri: 155.99,
           sat: 155.99,
-          sun: 105.99,
+          sun: 155.99,
           mon: 53.99,
         },
         tilt: {

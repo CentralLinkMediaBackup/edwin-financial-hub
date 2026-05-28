@@ -131,7 +131,12 @@ function AddOneTimeModal({ onClose, onSave }) {
 }
 
 function EditPaycheckModal({ paycheck, onClose, onSave }) {
+  const isOneTime = paycheck.isOneTime
   const [amount, setAmount] = useState(paycheck.amount)
+  const [date, setDate] = useState(paycheck.date || format(new Date(), 'yyyy-MM-dd'))
+  const [source, setSource] = useState(paycheck.source || (isOneTime ? SOURCES[0] : 'Prosperity Fire Protection, LLC'))
+  const [note, setNote] = useState(paycheck.note || '')
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div
@@ -146,29 +151,71 @@ function EditPaycheckModal({ paycheck, onClose, onSave }) {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         className="relative z-10 w-full max-w-sm rounded-2xl border border-white/10 p-6"
-        style={{ backgroundColor: '#0F1629' }}
+        style={{ backgroundColor: 'var(--bg-panel)' }}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-white">Edit Paycheck</h2>
+          <h2 className="text-lg font-bold text-white">{isOneTime ? 'Edit One-Time Income' : 'Edit Paycheck'}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={18} /></button>
         </div>
-        <p className="text-sm text-slate-400 mb-3">{formatDate(paycheck.date)}</p>
-        <div className="mb-4">
-          <label className="text-sm text-slate-400 block mb-1">Amount</label>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm text-slate-400 block mb-1">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+              <input
+                type="number"
+                value={amount}
+                onChange={e => setAmount(parseFloat(e.target.value) || 0)}
+                className="w-full pl-7 pr-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
+                step="0.01"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-sm text-slate-400 block mb-1">Date</label>
             <input
-              type="number"
-              value={amount}
-              onChange={e => setAmount(parseFloat(e.target.value) || 0)}
-              className="w-full pl-7 pr-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
-              step="0.01"
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
             />
           </div>
+          <div>
+            <label className="text-sm text-slate-400 block mb-1">Source</label>
+            {isOneTime ? (
+              <select
+                value={source}
+                onChange={e => setSource(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
+              >
+                {SOURCES.map(s => (
+                  <option key={s} value={s} className="bg-slate-900">{s}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={source}
+                onChange={e => setSource(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
+              />
+            )}
+          </div>
+          {isOneTime && (
+            <div>
+              <label className="text-sm text-slate-400 block mb-1">Note (optional)</label>
+              <input
+                type="text"
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
+              />
+            </div>
+          )}
         </div>
         <button
-          onClick={() => { onSave({ amount }); onClose() }}
-          className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold hover:bg-amber-400 transition-colors"
+          onClick={() => { onSave({ amount, date, source, note }); onClose() }}
+          className="w-full mt-5 py-2.5 rounded-xl bg-amber-500 text-white font-semibold hover:bg-amber-400 transition-colors"
         >
           Save
         </button>
@@ -181,6 +228,7 @@ export default function Paychecks() {
   const paychecks = useStore(s => s.paychecks)
   const transactions = useStore(s => s.transactions)
   const addTransaction = useStore(s => s.addTransaction)
+  const updateTransaction = useStore(s => s.updateTransaction)
   const updatePaycheck = useStore(s => s.updatePaycheck)
   const deletePaycheck = useStore(s => s.deletePaycheck)
   const addToast = useStore(s => s.addToast)
@@ -189,6 +237,7 @@ export default function Paychecks() {
   const [activeTab, setActiveTab] = useState('recurring')
   const [showOneTime, setShowOneTime] = useState(false)
   const [editPaycheck, setEditPaycheck] = useState(null)
+  const [editTransaction, setEditTransaction] = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
 
   const today = startOfDay(new Date())
@@ -401,6 +450,7 @@ export default function Paychecks() {
                   <th className="px-4 py-3 text-left text-xs text-slate-500">Amount</th>
                   <th className="px-4 py-3 text-left text-xs text-slate-500">Source</th>
                   <th className="px-4 py-3 text-left text-xs text-slate-500">Note</th>
+                  <th className="px-4 py-3 text-right text-xs text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -410,10 +460,18 @@ export default function Paychecks() {
                     <td className="px-4 py-2.5 font-mono text-emerald-400 font-bold">{formatCurrency(t.amount)}</td>
                     <td className="px-4 py-2.5 text-slate-400">{t.source}</td>
                     <td className="px-4 py-2.5 text-slate-500">{t.note || '—'}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => setEditTransaction(t)}
+                        className="p-1 rounded text-slate-500 hover:text-amber-400 transition-colors"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {oneTimeIncome.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-500">No one-time income logged</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">No one-time income logged</td></tr>
                 )}
               </tbody>
             </table>
@@ -446,6 +504,13 @@ export default function Paychecks() {
             paycheck={editPaycheck}
             onClose={() => setEditPaycheck(null)}
             onSave={(updates) => updatePaycheck(editPaycheck.id, updates)}
+          />
+        )}
+        {editTransaction && (
+          <EditPaycheckModal
+            paycheck={{ ...editTransaction, isOneTime: true }}
+            onClose={() => setEditTransaction(null)}
+            onSave={(updates) => updateTransaction(editTransaction.id, updates)}
           />
         )}
       </AnimatePresence>

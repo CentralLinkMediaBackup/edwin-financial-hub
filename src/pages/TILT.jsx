@@ -1,66 +1,92 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Lock, Zap, Plus, Trash2, Pencil, X, Check, ChevronDown, ChevronUp } from 'lucide-react'
-import { format, addDays, addWeeks, parseISO, nextFriday } from 'date-fns'
+import { format, addDays, parseISO } from 'date-fns'
 import { useStore } from '../store/useStore'
 import { formatCurrency, formatDate } from '../lib/formatters'
 
-function getNextFriday(from = new Date()) {
+// Returns the next Friday strictly after `from`. If `from` is a Friday, returns the FOLLOWING Friday.
+function getNextFridayAfter(from = new Date()) {
   const d = new Date(from)
   const day = d.getDay()
   if (day === 5) {
-    // Already Friday — next one is +7
+    // It's Friday — skip to next week's Friday
     d.setDate(d.getDate() + 7)
   } else {
-    const daysUntilFriday = (5 - day + 7) % 7 || 7
-    d.setDate(d.getDate() + daysUntilFriday)
+    const daysUntil = (5 - day + 7) % 7
+    d.setDate(d.getDate() + daysUntil)
   }
-  return format(d, 'yyyy-MM-dd')
+  return d
 }
 
-function getFollowingFriday(from) {
-  const d = parseISO(from)
-  d.setDate(d.getDate() + 7)
-  return format(d, 'yyyy-MM-dd')
+// Returns the next Friday AT OR AFTER `from`. If `from` is already a Friday, return it.
+function getNextFridayAtOrAfter(from) {
+  const d = new Date(from)
+  const day = d.getDay()
+  if (day === 5) return d
+  const daysUntil = (5 - day + 7) % 7
+  d.setDate(d.getDate() + daysUntil)
+  return d
 }
 
-function computePlan(amount, delivery, option) {
+// Correct repayment date logic:
+// Option A: next Friday strictly after today (if today is Friday, go to next week's Friday)
+// Option B/C: first payment = next Friday at or after (today + 14 days). Then every 14 days.
+function computePlan(amount, delivery, option, takeOutDate = new Date()) {
   const received = delivery === 'instant' ? amount - 12 : amount
-  const nextFri = getNextFriday()
-  const followFri = getFollowingFriday(nextFri)
-  const thirdFri = getFollowingFriday(followFri)
-  const fourthFri = getFollowingFriday(thirdFri)
+
+  // Option A: next Friday strictly after takeout date (not same day even if Friday)
+  const optADate = getNextFridayAfter(takeOutDate)
+  const optADateStr = format(optADate, 'yyyy-MM-dd')
+
+  // Option B/C: first payment = next Friday at or after (takeoutDate + 14 days)
+  const plus14 = addDays(takeOutDate, 14)
+  const firstBCDate = getNextFridayAtOrAfter(plus14)
+  const firstBCDateStr = format(firstBCDate, 'yyyy-MM-dd')
+
+  // Scale amounts by amount/400 ratio
+  const ratio = amount / 400
 
   if (option === 'A') {
     return {
-      label: 'Full Repay Next Friday',
+      label: 'Full Repay',
       apr: '0%',
-      payments: [{ date: nextFri, amount }],
+      payments: [{ date: optADateStr, amount }],
       total: amount,
+      interest: 0,
     }
   }
   if (option === 'B') {
+    const p1 = 254.04 * ratio
+    const p2 = 254.04 * ratio
+    const d2 = format(addDays(firstBCDate, 14), 'yyyy-MM-dd')
     return {
       label: '2 Payments (35.99% APR)',
       apr: '35.99%',
       payments: [
-        { date: nextFri, amount: 216.15 * (amount / 400) },
-        { date: followFri, amount: 204.15 * (amount / 400) },
+        { date: firstBCDateStr, amount: p1 },
+        { date: d2, amount: p2 },
       ],
-      total: (216.15 + 204.15) * (amount / 400),
+      total: p1 + p2,
+      interest: (p1 + p2) - amount,
     }
   }
   // Option C
+  const p = 129.21 * ratio
+  const d2 = format(addDays(firstBCDate, 14), 'yyyy-MM-dd')
+  const d3 = format(addDays(firstBCDate, 28), 'yyyy-MM-dd')
+  const d4 = format(addDays(firstBCDate, 42), 'yyyy-MM-dd')
   return {
     label: '4 Payments (35.99% APR)',
     apr: '35.99%',
     payments: [
-      { date: nextFri, amount: 116.84 * (amount / 400) },
-      { date: followFri, amount: 104.84 * (amount / 400) },
-      { date: thirdFri, amount: 104.84 * (amount / 400) },
-      { date: fourthFri, amount: 104.84 * (amount / 400) },
+      { date: firstBCDateStr, amount: p },
+      { date: d2, amount: p },
+      { date: d3, amount: p },
+      { date: d4, amount: p },
     ],
-    total: (116.84 + 104.84 * 3) * (amount / 400),
+    total: p * 4,
+    interest: (p * 4) - amount,
   }
 }
 
@@ -118,7 +144,7 @@ function TiltGauge({ used, max }) {
 // Log New TILT Modal
 function LogTiltModal({ onClose, onSave }) {
   const settings = useStore(s => s.settings.tilt)
-  const [amount, setAmount] = useState(100)
+  const [amount, setAmount] = useState(400)
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [reason, setReason] = useState('')
   const [delivery, setDelivery] = useState('instant')
@@ -126,7 +152,8 @@ function LogTiltModal({ onClose, onSave }) {
 
   const fee = delivery === 'instant' ? settings.instantFee : 0
   const received = amount - fee
-  const plan = computePlan(amount, delivery, option)
+  const takeOutDateObj = date ? new Date(date + 'T12:00:00') : new Date()
+  const plan = computePlan(amount, delivery, option, takeOutDateObj)
 
   const handleSave = () => {
     onSave({ amount, date, reason, delivery, option, plan, fee })
@@ -147,7 +174,7 @@ function LogTiltModal({ onClose, onSave }) {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         className="relative z-10 w-full max-w-lg rounded-2xl border border-white/10 overflow-hidden overflow-y-auto"
-        style={{ backgroundColor: '#0F1629', maxHeight: '90vh' }}
+        style={{ backgroundColor: 'var(--bg-panel)', maxHeight: '90vh' }}
       >
         <div className="flex items-center justify-between p-5 border-b border-white/10">
           <h2 className="text-lg font-bold text-white">Log New TILT</h2>
@@ -208,7 +235,7 @@ function LogTiltModal({ onClose, onSave }) {
                 {
                   key: 'instant',
                   label: 'Instant',
-                  sub: `You receive ${formatCurrency(amount - settings.instantFee)} ($${settings.instantFee} fee)`,
+                  sub: `You will receive ${formatCurrency(amount - settings.instantFee)} (−$${settings.instantFee} fee)`,
                 },
                 {
                   key: 'standard',
@@ -240,7 +267,7 @@ function LogTiltModal({ onClose, onSave }) {
             <label className="text-sm text-slate-400 block mb-2">Repayment Plan</label>
             <div className="space-y-2">
               {['A', 'B', 'C'].map(opt => {
-                const p = computePlan(amount, delivery, opt)
+                const p = computePlan(amount, delivery, opt, takeOutDateObj)
                 return (
                   <motion.button
                     key={opt}
@@ -292,9 +319,13 @@ function LogTiltModal({ onClose, onSave }) {
   )
 }
 
-// Edit TILT Modal
+// Edit TILT Modal — full form
 function EditTiltModal({ log, onClose, onSave }) {
   const [status, setStatus] = useState(log.status)
+  const [amount, setAmount] = useState(log.amountUsed)
+  const [repaymentDate, setRepaymentDate] = useState(log.repaymentDate || '')
+  const [repaymentOption, setRepaymentOption] = useState(log.repaymentOption || 'A')
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div
@@ -308,32 +339,86 @@ function EditTiltModal({ log, onClose, onSave }) {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="relative z-10 w-full max-w-sm rounded-2xl border border-white/10 p-6"
-        style={{ backgroundColor: '#0F1629' }}
+        className="relative z-10 w-full max-w-sm rounded-2xl border border-white/10 p-6 overflow-y-auto"
+        style={{ backgroundColor: 'var(--bg-panel)', maxHeight: '90vh' }}
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-white">Edit TILT Entry</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={18} /></button>
         </div>
-        <div className="mb-4">
-          <label className="text-sm text-slate-400 block mb-2">Status</label>
-          <div className="flex gap-2">
-            {['active', 'repaid'].map(s => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-all ${
-                  status === s ? 'border-amber-500 bg-amber-500/10 text-amber-400' : 'border-white/10 bg-white/5 text-slate-400'
-                }`}
-              >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
+
+        <div className="space-y-4">
+          {/* Amount */}
+          <div>
+            <label className="text-sm text-slate-400 block mb-1">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+              <input
+                type="number"
+                value={amount}
+                onChange={e => setAmount(parseFloat(e.target.value) || 0)}
+                className="w-full pl-7 pr-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
+                step="0.01"
+                min="0"
+              />
+            </div>
+          </div>
+
+          {/* Repayment Date */}
+          <div>
+            <label className="text-sm text-slate-400 block mb-1">Repayment Date</label>
+            <input
+              type="date"
+              value={repaymentDate}
+              onChange={e => setRepaymentDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
+            />
+          </div>
+
+          {/* Repayment Option */}
+          <div>
+            <label className="text-sm text-slate-400 block mb-2">Repayment Option</label>
+            <div className="flex gap-2">
+              {['A', 'B', 'C'].map(opt => (
+                <button
+                  key={opt}
+                  onClick={() => setRepaymentOption(opt)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-all ${
+                    repaymentOption === opt
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                      : 'border-white/10 bg-white/5 text-slate-400'
+                  }`}
+                >
+                  Option {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Status */}
+          <div>
+            <label className="text-sm text-slate-400 block mb-2">Status</label>
+            <div className="flex gap-2">
+              {['active', 'repaid'].map(s => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-all ${
+                    status === s
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                      : 'border-white/10 bg-white/5 text-slate-400'
+                  }`}
+                >
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
         <button
-          onClick={() => { onSave({ status }); onClose() }}
-          className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold hover:bg-amber-400 transition-colors"
+          onClick={() => { onSave({ status, amountUsed: amount, repaymentDate, repaymentOption }); onClose() }}
+          className="w-full mt-5 py-2.5 rounded-xl bg-amber-500 text-white font-semibold hover:bg-amber-400 transition-colors"
         >
           Save Changes
         </button>
@@ -359,7 +444,7 @@ export default function TILT() {
   const usedAmount = activeLog ? activeLog.amountUsed : 0
 
   const handleSaveTilt = (data) => {
-    const nextFri = getNextFriday()
+    const takeOutDateObj = data.date ? new Date(data.date + 'T12:00:00') : new Date()
     addTiltLog({
       amountUsed: data.amount,
       creditLimit: settings.maxCredit,
@@ -459,7 +544,7 @@ export default function TILT() {
             </thead>
             <tbody>
               {tiltLogs.map((log, i) => {
-                const received = log.instantDelivery ? log.amountUsed - (log.instantFee || 12) : log.amountUsed
+                const received = log.instantDelivery ? log.amountUsed - (log.instantFee ?? 12) : log.amountUsed
                 return (
                   <motion.tr
                     key={log.id}
