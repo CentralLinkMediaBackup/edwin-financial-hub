@@ -4,8 +4,11 @@ import { Bot, X, Send, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { formatCurrency, formatDate } from '../../lib/formatters'
 import { format, addDays, parseISO } from 'date-fns'
+import { callClaudeProxy } from '../../lib/claude'
 
-const CHAT_STORAGE_KEY = 'eb-financial-hub-chat'
+const CHAT_STORAGE_KEY  = 'eb-financial-hub-chat'
+const USAGE_STORAGE_KEY = 'eb-financial-hub-ai-usage'
+const DAILY_LIMIT = 50
 
 const SUGGESTION_CHIPS = [
   'Can I eat out tonight?',
@@ -14,144 +17,114 @@ const SUGGESTION_CHIPS = [
   'Am I safe this week?',
 ]
 
-// ─── Gemini Function Declarations ─────────────────────────────────────────────
-const GEMINI_TOOLS = [
+// ─── Daily usage helpers (localStorage) ──────────────────────────────────────
+function getUsageToday() {
+  try {
+    const raw = localStorage.getItem(USAGE_STORAGE_KEY)
+    if (!raw) return { count: 0, date: new Date().toDateString() }
+    const parsed = JSON.parse(raw)
+    if (parsed.date !== new Date().toDateString()) return { count: 0, date: new Date().toDateString() }
+    return parsed
+  } catch {
+    return { count: 0, date: new Date().toDateString() }
+  }
+}
+
+function incrementUsage() {
+  const usage = getUsageToday()
+  const updated = { count: usage.count + 1, date: usage.date }
+  localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(updated))
+  return updated.count
+}
+
+function isLimitReached() {
+  return getUsageToday().count >= DAILY_LIMIT
+}
+
+// ─── Claude Tool Declarations ─────────────────────────────────────────────────
+const CLAUDE_TOOLS = [
   {
-    functionDeclarations: [
-      {
-        name: 'log_transaction',
-        description: 'Log a financial transaction (expense or income) to the expenses tracker',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            amount:   { type: 'NUMBER', description: 'Amount in dollars (positive number)' },
-            type:     { type: 'STRING', description: '"in" for income, "out" for expense' },
-            category: { type: 'STRING', description: 'Category: Food, Bills, Transport, Entertainment, Health, Other' },
-            note:     { type: 'STRING', description: 'Description of the transaction' },
-            account:  { type: 'STRING', description: 'Account: chaseDebit, capitalOneDebit, cashApp, paypal' },
-            date:     { type: 'STRING', description: 'Date in YYYY-MM-DD format. Use today if not specified.' },
-          },
-          required: ['amount', 'type', 'category'],
-        },
+    name: 'log_transaction',
+    description: 'Log a financial transaction (expense or income) to the expenses tracker',
+    input_schema: {
+      type: 'object',
+      properties: {
+        amount:   { type: 'number',  description: 'Amount in dollars (positive number)' },
+        type:     { type: 'string',  description: '"in" for income, "out" for expense' },
+        category: { type: 'string',  description: 'Category: Food, Bills, Transport, Entertainment, Health, Other' },
+        note:     { type: 'string',  description: 'Description of the transaction' },
+        account:  { type: 'string',  description: 'Account: chaseDebit, capitalOneDebit, cashApp, paypal' },
+        date:     { type: 'string',  description: 'Date in YYYY-MM-DD format. Use today if not specified.' },
       },
-      {
-        name: 'update_account_balance',
-        description: "Update the balance of one of the user's accounts",
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            account: { type: 'STRING', description: 'Account key: chaseDebit, capitalOneDebit, cashApp, paypal' },
-            balance: { type: 'NUMBER', description: 'New balance in dollars' },
-          },
-          required: ['account', 'balance'],
-        },
+      required: ['amount', 'type', 'category'],
+    },
+  },
+  {
+    name: 'update_account_balance',
+    description: "Update the balance of one of the user's accounts",
+    input_schema: {
+      type: 'object',
+      properties: {
+        account: { type: 'string', description: 'Account key: chaseDebit, capitalOneDebit, cashApp, paypal' },
+        balance: { type: 'number', description: 'New balance in dollars' },
       },
-      {
-        name: 'log_one_time_income',
-        description: 'Log a one-time income payment (bonus, client payment, etc.)',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            amount: { type: 'NUMBER', description: 'Income amount in dollars' },
-            source: { type: 'STRING', description: 'Source: CLM Client Payment, Gift, Tax Return, Side Income, Other' },
-            note:   { type: 'STRING', description: 'Description' },
-            date:   { type: 'STRING', description: 'Date YYYY-MM-DD' },
-          },
-          required: ['amount', 'source'],
-        },
+      required: ['account', 'balance'],
+    },
+  },
+  {
+    name: 'log_one_time_income',
+    description: 'Log a one-time income payment (bonus, client payment, etc.)',
+    input_schema: {
+      type: 'object',
+      properties: {
+        amount: { type: 'number', description: 'Income amount in dollars' },
+        source: { type: 'string', description: 'Source: CLM Client Payment, Gift, Tax Return, Side Income, Other' },
+        note:   { type: 'string', description: 'Description' },
+        date:   { type: 'string', description: 'Date YYYY-MM-DD' },
       },
-      {
-        name: 'mark_earnin_step',
-        description: 'Mark an Earn In step as taken or untaken for the current cycle',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            day:   { type: 'STRING',  description: 'Day key: fri, sat, sun, mon' },
-            taken: { type: 'BOOLEAN', description: 'true to mark as taken, false to unmark' },
-          },
-          required: ['day', 'taken'],
-        },
+      required: ['amount', 'source'],
+    },
+  },
+  {
+    name: 'mark_earnin_step',
+    description: 'Mark an Earn In step as taken or untaken for the current cycle',
+    input_schema: {
+      type: 'object',
+      properties: {
+        day:   { type: 'string',  description: 'Day key: fri, sat, sun, mon' },
+        taken: { type: 'boolean', description: 'true to mark as taken, false to unmark' },
       },
-      {
-        name: 'log_savings_deposit',
-        description: 'Log a deposit to a savings goal',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            goalId: { type: 'STRING', description: 'ID of the savings goal' },
-            amount: { type: 'NUMBER', description: 'Amount to deposit' },
-          },
-          required: ['goalId', 'amount'],
-        },
+      required: ['day', 'taken'],
+    },
+  },
+  {
+    name: 'log_savings_deposit',
+    description: 'Log a deposit to a savings goal',
+    input_schema: {
+      type: 'object',
+      properties: {
+        goalId: { type: 'string', description: 'ID of the savings goal' },
+        amount: { type: 'number', description: 'Amount to deposit' },
       },
-    ],
+      required: ['goalId', 'amount'],
+    },
   },
 ]
 
-// ─── callGemini with function calling ─────────────────────────────────────────
-async function callGemini(messages, systemPrompt) {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-  if (!apiKey) throw new Error('NO_API_KEY')
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
-
-  // Gemini requires conversation to start with a user turn
-  const allContents = messages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
-    .map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }))
-  const contents = allContents[0]?.role === 'model' ? allContents.slice(1) : allContents
-
-  const body = {
-    system_instruction: { parts: [{ text: systemPrompt }] },
-    contents,
-    tools: GEMINI_TOOLS,
-    generationConfig: { temperature: 0.5, maxOutputTokens: 800 },
-  }
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) {
-    const errText = await res.text()
-    let googleMsg = ''
-    try { googleMsg = JSON.parse(errText)?.error?.message || '' } catch { /* not JSON */ }
-    console.error('Gemini API error:', res.status, googleMsg || errText)
-    throw new Error(`API_ERROR:${res.status}:${googleMsg}`)
-  }
-
-  const data = await res.json()
-  const candidate = data.candidates?.[0]
-  if (!candidate) throw new Error('NO_CANDIDATE')
-
-  const part = candidate.content?.parts?.[0]
-  if (part?.functionCall) {
-    return { functionCall: part.functionCall }
-  }
-
-  return { text: part?.text || 'I could not generate a response.' }
-}
-
 // ─── buildSystemPrompt ────────────────────────────────────────────────────────
+// Preserved exactly — no changes to the financial logic.
 function buildSystemPrompt(store) {
   const today = new Date()
   const todayStr = format(today, 'EEEE, MMMM d yyyy')
   const accounts = store.accounts
   const totalBalance = Object.values(accounts).reduce((a, b) => a + b, 0)
 
-  // Bills — all active
   const activeBills = (store.bills || []).filter(b => b.isActive)
   const monthlyTotal = activeBills.filter(b => b.frequency === 'monthly').reduce((s, b) => s + b.amount, 0)
   const billsList = activeBills.map(b =>
     `  - ${b.name}: $${b.amount.toFixed(2)} due ${b.dueDay ? `on ${b.dueDay}` : 'flexible'}`
   ).join('\n')
 
-  // Upcoming paychecks (next 3)
   const upcomingPaychecks = (store.paychecks || [])
     .filter(p => !p.isOneTime && parseISO(p.date) >= today)
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -160,13 +133,11 @@ function buildSystemPrompt(store) {
     `  - ${format(parseISO(p.date), 'EEE MMM d')}: $${p.amount.toFixed(2)} from ${p.source || 'Employment'}`
   ).join('\n') || '  - None scheduled'
 
-  // TILT
   const activeTilt = (store.tiltLogs || []).find(l => l.status === 'active')
   const tiltStatus = activeTilt
     ? `ACTIVE — $${activeTilt.amountUsed} used, repayment due ${activeTilt.repaymentDate}`
     : 'CLEAR (no active advances)'
 
-  // Earn In
   const activeEarnIn = (store.earnInLogs || []).find(l => l.status === 'active')
   const earnInStatus = activeEarnIn
     ? `Active cycle (started ${activeEarnIn.cycleStartDate}).
@@ -174,28 +145,21 @@ function buildSystemPrompt(store) {
   Repayment: $${activeEarnIn.repaymentAmount || 521.96}`
     : 'No active cycle'
 
-  // Afterpay
   const afterpayLines = (store.afterpayItems || []).flatMap(item =>
     item.payments
       .filter(p => p.status !== 'paid')
       .map(p => `  - ${item.name} #${p.number}: $${p.amount.toFixed(2)} due ${p.dueDate}`)
   ).join('\n') || '  - None'
 
-  // Debts
-  const totalDebt = (store.debts || []).reduce((s, d) => s + d.totalBalance, 0)
-
-  // Savings
+  const totalDebt  = (store.debts || []).reduce((s, d) => s + d.totalBalance, 0)
   const totalSaved = (store.savingsGoals || []).reduce((s, g) => s + (g.currentAmount || 0), 0)
 
-  // ── Day-by-day projection for next 14 days ────────────────────────────────
-  // Build a map: date string -> list of {label, amount (+/-)}
   const eventMap = {}
   const addEvent = (dateStr, label, amount) => {
     if (!eventMap[dateStr]) eventMap[dateStr] = []
     eventMap[dateStr].push({ label, amount })
   }
 
-  // EarnIn steps (days relative to cycle start)
   if (activeEarnIn) {
     const daysConfig = [
       { key: 'fri', offset: 0, amount: activeEarnIn.amounts?.fri ?? 155.99, takenKey: 'fri_taken' },
@@ -210,43 +174,27 @@ function buildSystemPrompt(store) {
         addEvent(dateStr, `EarnIn ${d.key.charAt(0).toUpperCase() + d.key.slice(1)} withdrawal`, +d.amount)
       }
     })
-    // Repayment date (7 days after cycle start)
     const repayDate = format(addDays(cycleStart, 7), 'yyyy-MM-dd')
     addEvent(repayDate, 'EarnIn Repayment', -(activeEarnIn.repaymentAmount || 521.96))
   }
 
-  // TILT repayment
-  if (activeTilt) {
-    addEvent(activeTilt.repaymentDate, 'TILT Repayment', -activeTilt.amountUsed)
-  }
+  if (activeTilt) addEvent(activeTilt.repaymentDate, 'TILT Repayment', -activeTilt.amountUsed)
 
-  // Paychecks
-  upcomingPaychecks.forEach(p => {
-    addEvent(p.date, `Paycheck (${p.source || 'Employment'})`, +p.amount)
-  })
+  upcomingPaychecks.forEach(p => addEvent(p.date, `Paycheck (${p.source || 'Employment'})`, +p.amount))
 
-  // Bills for current and next month
   const currentMonth = today.getMonth()
-  const currentYear = today.getFullYear()
+  const currentYear  = today.getFullYear()
   activeBills.filter(b => b.dueDay).forEach(b => {
-    // This month
-    const d1 = new Date(currentYear, currentMonth, b.dueDay)
-    const d1Str = format(d1, 'yyyy-MM-dd')
-    addEvent(d1Str, `Bill: ${b.name}`, -b.amount)
-    // Next month
-    const d2 = new Date(currentYear, currentMonth + 1, b.dueDay)
-    const d2Str = format(d2, 'yyyy-MM-dd')
-    addEvent(d2Str, `Bill: ${b.name}`, -b.amount)
+    addEvent(format(new Date(currentYear, currentMonth, b.dueDay), 'yyyy-MM-dd'), `Bill: ${b.name}`, -b.amount)
+    addEvent(format(new Date(currentYear, currentMonth + 1, b.dueDay), 'yyyy-MM-dd'), `Bill: ${b.name}`, -b.amount)
   })
 
-  // Afterpay upcoming payments
   ;(store.afterpayItems || []).forEach(item => {
     item.payments.filter(p => p.status !== 'paid').forEach(p => {
       addEvent(p.dueDate, `Afterpay ${item.name} #${p.number}`, -p.amount)
     })
   })
 
-  // Build projection lines for next 14 days
   let runningBalance = totalBalance
   const projectionLines = []
   for (let i = 0; i < 14; i++) {
@@ -332,7 +280,7 @@ Always respond in the daily list format. Never paragraphs. Show each day, the tr
 
 $20 buffer is ABSOLUTE MINIMUM — never recommend spending if it causes any day to drop below $20.
 
-AVAILABLE ACTIONS (use function calls for these):
+AVAILABLE ACTIONS (use tool calls for these):
 - Log any expense or income transaction
 - Update account balances
 - Log one-time income
@@ -429,6 +377,7 @@ export function AIAssistant() {
   const [messages, setMessages] = useState(loadChatHistory)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [noticeText, setNoticeText] = useState('')
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const store = useStore()
@@ -448,7 +397,7 @@ export function AIAssistant() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isLoading])
+  }, [messages, isLoading, noticeText])
 
   const handleSend = async (text) => {
     const content = (text || input).trim()
@@ -456,17 +405,44 @@ export function AIAssistant() {
     setInput('')
     setShowChips(false)
 
+    // Daily limit check
+    if (isLimitReached()) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Daily AI limit reached, resets tomorrow',
+        timestamp: Date.now(),
+      }])
+      return
+    }
+
     const userMsg = { role: 'user', content, timestamp: Date.now() }
     const updatedMessages = [...messages, userMsg]
     setMessages(updatedMessages)
     setIsLoading(true)
 
+    // Consent notice — visible for 2 seconds before any API call is made
+    setNoticeText('This message will use your API credits. Sending...')
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    setNoticeText('')
+
     try {
       const systemPrompt = buildSystemPrompt(store)
-      const result = await callGemini(updatedMessages, systemPrompt)
+      const data = await callClaudeProxy(updatedMessages, systemPrompt, CLAUDE_TOOLS)
 
-      if (result.functionCall) {
-        const { name, args } = result.functionCall
+      // Console log with timestamp and token counts
+      const inputTokens  = data.usage?.input_tokens  || 0
+      const outputTokens = data.usage?.output_tokens || 0
+      console.log(`[Claude API] ${new Date().toISOString()} | input: ${inputTokens} tokens | output: ${outputTokens} tokens | model: claude-haiku-4-5-20251001`)
+
+      // Track daily usage
+      const callCount = incrementUsage()
+      console.log(`[Claude API] Daily usage: ${callCount}/${DAILY_LIMIT}`)
+
+      const stopReason = data.stop_reason
+      const toolUseBlock = data.content?.find(b => b.type === 'tool_use')
+
+      if (stopReason === 'tool_use' && toolUseBlock) {
+        const { name, input: args } = toolUseBlock
         let actionResult = ''
 
         if (name === 'log_transaction') {
@@ -508,10 +484,8 @@ export function AIAssistant() {
         } else if (name === 'log_savings_deposit') {
           const goal = (store.savingsGoals || []).find(g => g.id === args.goalId)
           if (goal) {
-            const deposit = { id: `dep-${Date.now()}`, amount: args.amount, date: format(new Date(), 'yyyy-MM-dd') }
             store.updateSavingsGoal(goal.id, {
               currentAmount: (goal.currentAmount || 0) + args.amount,
-              deposits: [...(goal.deposits || []), deposit],
             })
             actionResult = `✅ Added $${args.amount.toFixed(2)} deposit to "${goal.name}".`
           } else {
@@ -523,28 +497,28 @@ export function AIAssistant() {
 
         setMessages(prev => [...prev, { role: 'assistant', content: actionResult, timestamp: Date.now() }])
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: result.text, timestamp: Date.now() }])
+        const textBlock = data.content?.find(b => b.type === 'text')
+        const reply = textBlock?.text || 'Sorry, I could not generate a response.'
+        setMessages(prev => [...prev, { role: 'assistant', content: reply, timestamp: Date.now() }])
       }
     } catch (err) {
       let errMsg
-      if (err.message === 'NO_API_KEY') {
-        errMsg = 'No Gemini API key found. Check your environment configuration.'
-      } else if (err.message.startsWith('API_ERROR:')) {
-        const rest = err.message.slice('API_ERROR:'.length)
+      if (err.message.startsWith('CLAUDE_ERROR:')) {
+        const rest = err.message.slice('CLAUDE_ERROR:'.length)
         const colonIdx = rest.indexOf(':')
         const status = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest
         const detail = colonIdx >= 0 ? rest.slice(colonIdx + 1) : ''
         if (status === '429') {
-          errMsg = detail
-            ? `Quota error: ${detail}`
-            : 'Rate limit hit — check Google Cloud Console → APIs & Services → Quotas for the Generative Language API.'
+          errMsg = 'Rate limit reached. Please wait a moment and try again.'
+        } else if (status === '401') {
+          errMsg = 'API key error — check the ANTHROPIC_API_KEY secret in Cloudflare Pages.'
         } else {
-          errMsg = `API error (${status})${detail ? ': ' + detail : ''}. Check browser console.`
+          errMsg = `API error (${status})${detail ? ': ' + detail : ''}. Check the browser console.`
         }
       } else {
         errMsg = `Error: ${err.message}. Check the browser console for details.`
-        console.error('Gemini error:', err)
       }
+      console.error('[Claude API] Error:', err)
       setMessages(prev => [...prev, { role: 'assistant', content: errMsg, timestamp: Date.now() }])
     } finally {
       setIsLoading(false)
@@ -599,7 +573,7 @@ export function AIAssistant() {
                   />
                 </div>
                 <div>
-                  <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Gemini AI</p>
+                  <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>Claude AI</p>
                   <p className="text-xs text-slate-500">Your financial assistant</p>
                 </div>
               </div>
@@ -655,7 +629,27 @@ export function AIAssistant() {
                 </motion.div>
               ))}
 
-              {isLoading && (
+              {/* 2-second consent notice — shown before every API call */}
+              {noticeText && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex justify-start"
+                >
+                  <div
+                    className="px-3.5 py-2 rounded-2xl rounded-bl-sm border text-xs italic"
+                    style={{
+                      backgroundColor: 'rgba(245,158,11,0.08)',
+                      borderColor: 'rgba(245,158,11,0.25)',
+                      color: '#F59E0B',
+                    }}
+                  >
+                    {noticeText}
+                  </div>
+                </motion.div>
+              )}
+
+              {isLoading && !noticeText && (
                 <div className="flex justify-start">
                   <div
                     className="rounded-2xl rounded-bl-sm border border-white/10"
@@ -732,12 +726,11 @@ export function AIAssistant() {
         )}
       </AnimatePresence>
 
-      {/* Floating Button with pulse ring */}
+      {/* Floating Button */}
       <div
         className="fixed bottom-6 right-6 z-50"
         onMouseEnter={() => !isOpen && setShowChips(false)}
       >
-        {/* Suggestion chips above button (hover state) */}
         <AnimatePresence>
           {!isOpen && showChips && (
             <motion.div
@@ -762,7 +755,6 @@ export function AIAssistant() {
           )}
         </AnimatePresence>
 
-        {/* Pulse ring */}
         {!isOpen && (
           <motion.div
             className="absolute inset-0 rounded-full border-2 border-amber-400/40"
