@@ -426,7 +426,37 @@ export function AIAssistant() {
     setNoticeText('')
 
     try {
-      const systemPrompt = buildSystemPrompt(store)
+      // Read live state at call time — useStore.getState() bypasses React's render
+      // cycle and always returns the current Zustand state, never a stale snapshot.
+      const liveState = useStore.getState()
+      const totalBal = Object.values(liveState.accounts).reduce((a, b) => a + b, 0)
+      const activeBillCount = (liveState.bills || []).filter(b => b.isActive).length
+      const activeEarnIn = (liveState.earnInLogs || []).find(l => l.status === 'active')
+      const activeTilt   = (liveState.tiltLogs   || []).find(l => l.status === 'active')
+      const currentMonthTxs = (liveState.transactions || []).filter(t => {
+        try { return new Date(t.date).getMonth() === new Date().getMonth() } catch { return false }
+      })
+      console.log('[Claude API] Fresh snapshot —', new Date().toISOString())
+      console.log('[Claude API] Snapshot:', {
+        totalBalance:     `$${totalBal.toFixed(2)}`,
+        chase:            `$${(liveState.accounts.chaseDebit || 0).toFixed(2)}`,
+        capitalOne:       `$${(liveState.accounts.capitalOneDebit || 0).toFixed(2)}`,
+        cashApp:          `$${(liveState.accounts.cashApp || 0).toFixed(2)}`,
+        paypal:           `$${(liveState.accounts.paypal || 0).toFixed(2)}`,
+        activeBills:      activeBillCount,
+        paychecks:        (liveState.paychecks || []).length,
+        earnIn:           activeEarnIn
+          ? `active since ${activeEarnIn.cycleStartDate} | taken: fri=${activeEarnIn.fri_taken} sat=${activeEarnIn.sat_taken} sun=${activeEarnIn.sun_taken} mon=${activeEarnIn.mon_taken} | repayment $${activeEarnIn.repaymentAmount}`
+          : 'no active cycle',
+        tilt:             activeTilt ? `active $${activeTilt.amountUsed} due ${activeTilt.repaymentDate}` : 'clear',
+        afterpayItems:    (liveState.afterpayItems || []).length,
+        currentMonthTxs:  currentMonthTxs.length,
+        projectedBalance: liveState.projectedBalance ?? 'auto-calculated',
+        savingsGoals:     (liveState.savingsGoals || []).length,
+        debts:            (liveState.debts || []).map(d => `${d.name}: $${d.totalBalance}`),
+      })
+
+      const systemPrompt = buildSystemPrompt(liveState)
       const data = await callClaudeProxy(updatedMessages, systemPrompt, CLAUDE_TOOLS)
 
       // Console log with timestamp and token counts
