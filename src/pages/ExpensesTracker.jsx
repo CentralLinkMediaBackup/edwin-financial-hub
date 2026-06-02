@@ -6,7 +6,7 @@ import {
 import {
   Plus, Search, Download, Pencil, Trash2,
   Check, X, Utensils, CreditCard, Car, ShoppingCart,
-  HeartPulse, MoreHorizontal, FileText
+  HeartPulse, MoreHorizontal, FileText, Clock
 } from 'lucide-react'
 import { format, parseISO, startOfMonth, endOfMonth, isAfter, isBefore } from 'date-fns'
 import { Modal } from '../components/ui/Modal'
@@ -199,6 +199,10 @@ function TxModal({ isOpen, onClose, initial = null }) {
 export default function ExpensesTracker() {
   const transactions = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
+  const pendingIncome = useStore(s => s.pendingIncome)
+  const markPendingPaid = useStore(s => s.markPendingPaid)
+
+  const pendingItems = pendingIncome?.filter(p => p.status === 'pending') || []
 
   const [showAdd, setShowAdd] = useState(false)
   const [editTx, setEditTx] = useState(null)
@@ -287,6 +291,52 @@ export default function ExpensesTracker() {
           </motion.button>
         </div>
       </div>
+
+      {/* Pending Income */}
+      {pendingItems.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {pendingItems.map(item => (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-2xl p-4 border"
+              style={{ background: 'rgba(245,158,11,0.06)', borderColor: 'rgba(245,158,11,0.25)' }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock size={13} className="text-amber-400 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-amber-400 uppercase tracking-wide">Pending Income</span>
+                  </div>
+                  <p className="text-base font-bold text-white">{item.label}</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+                    {item.details.map((d, i) => (
+                      <span key={i} className="text-xs text-slate-400">{d.desc} — <span className="text-slate-300 font-mono">${d.amount.toFixed(2)}</span></span>
+                    ))}
+                  </div>
+                  {item.note && (
+                    <p className="text-xs text-amber-500/70 mt-1 italic">{item.note}</p>
+                  )}
+                </div>
+                <div className="text-right flex-shrink-0 flex flex-col items-end gap-2">
+                  <p className="text-xl font-bold font-mono text-amber-400">+${item.amount.toFixed(2)}</p>
+                  <motion.button
+                    whileHover={{ scale: 1.04 }}
+                    whileTap={{ scale: 0.96 }}
+                    onClick={() => markPendingPaid(item.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white"
+                    style={{ backgroundColor: '#10B981' }}
+                  >
+                    <Check size={13} />
+                    Mark as Paid
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
 
       {/* Category breakdown chart */}
       {categoryBreakdown.length > 0 && (

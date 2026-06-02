@@ -35,7 +35,7 @@ const defaultBills = [
   { id: 'bill-4',  name: 'Spectrum Internet',     amount: 50.26,   dueDay: 25,  frequency: 'monthly',    isActive: true,  category: 'Utilities' },
   { id: 'bill-5',  name: 'Spectrum Mobile',       amount: 2.22,    dueDay: 19,  frequency: 'monthly',    isActive: true,  category: 'Phone' },
   { id: 'bill-6',  name: 'iPhone Data',           amount: 55.00,   dueDay: null, frequency: 'monthly',   isActive: true,  category: 'Phone', note: 'Flexible due date' },
-  { id: 'bill-7',  name: 'Rent',                  amount: 1433.03, dueDay: 1,   frequency: 'monthly',    isActive: true,  category: 'Housing', note: '1st-3rd' },
+  { id: 'bill-7',  name: 'Rent',                  amount: 1433.03, dueDay: 3,   frequency: 'monthly',    isActive: true,  category: 'Housing', note: 'Due Jun 3' },
   { id: 'bill-8',  name: 'Apt Insurance',         amount: 19.17,   dueDay: 2,   frequency: 'monthly',    isActive: true,  category: 'Insurance' },
   { id: 'bill-9',  name: 'Amazon Kindle',         amount: 12.98,   dueDay: 21,  frequency: 'monthly',    isActive: true,  category: 'Entertainment' },
   { id: 'bill-10', name: 'Spotify',               amount: 14.06,   dueDay: 21,  frequency: 'monthly',    isActive: true,  category: 'Entertainment' },
@@ -69,24 +69,10 @@ const defaultAfterPayItems = [
   },
 ]
 
-// TILT — the $400 advance was repaid May 29
-const defaultTiltLogs = [
-  {
-    id: 'tilt-1',
-    amountUsed: 400,
-    creditLimit: 400,
-    instantDelivery: true,
-    instantFee: 12,
-    repaymentDate: '2026-05-29',
-    repaymentOption: 'A',
-    status: 'repaid',
-    repaidAt: '2026-05-29',
-    createdAt: '2026-05-22',
-    note: 'Option A repayment',
-  },
-]
+// TILT — clear, no active advance
+const defaultTiltLogs = []
 
-// EarnIn — May 29 cycle complete/repaid, next cycle June 5
+// EarnIn — May 29 cycle active (all 4 taken), repayment due Jun 5
 const defaultEarnInLogs = [
   {
     id: 'earnin-1',
@@ -95,17 +81,6 @@ const defaultEarnInLogs = [
     sat_taken: true,
     sun_taken: true,
     mon_taken: true,
-    amounts: { fri: 155.99, sat: 155.99, sun: 105.99, mon: 53.99 },
-    repaymentAmount: 521.96,
-    status: 'repaid',
-  },
-  {
-    id: 'earnin-2',
-    cycleStartDate: '2026-06-05',
-    fri_taken: false,
-    sat_taken: false,
-    sun_taken: false,
-    mon_taken: false,
     amounts: { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 },
     repaymentAmount: 521.96,
     status: 'active',
@@ -265,7 +240,7 @@ export const useStore = create(
 
       // ─── ACCOUNTS ─────────────────────────────────────────────
       accounts: {
-        chaseDebit: 1960.27,
+        chaseDebit: 1971.32,
         capitalOneDebit: 0,
         cashApp: 0,
         paypal: 0,
@@ -283,6 +258,52 @@ export const useStore = create(
       // ─── PROJECTED BALANCE OVERRIDE ───────────────────────────
       projectedBalance: 2469.45,
       setProjectedBalance: (val) => set({ projectedBalance: val }),
+
+      // ─── PENDING INCOME ───────────────────────────────────────
+      pendingIncome: [
+        {
+          id: 'pending-1',
+          label: "Wife's Due",
+          amount: 224.57,
+          details: [
+            { desc: 'Zelle from Father', amount: 150.00 },
+            { desc: 'Zelle from Father', amount: 37.00 },
+            { desc: 'Hot Topic', amount: 12.57 },
+            { desc: 'Additional', amount: 25.00 },
+          ],
+          note: 'More owed, amount pending confirmation',
+          status: 'pending',
+          createdAt: '2026-06-02',
+        },
+      ],
+      markPendingPaid: (id) => {
+        set((state) => {
+          const item = state.pendingIncome.find(p => p.id === id)
+          if (!item || item.status === 'paid') return state
+          const newTx = {
+            id: generateId(),
+            date: format(new Date(), 'yyyy-MM-dd'),
+            type: 'in',
+            amount: item.amount,
+            category: 'Income',
+            note: item.label,
+            account: 'chaseDebit',
+            createdAt: new Date().toISOString(),
+          }
+          return {
+            pendingIncome: state.pendingIncome.map(p => p.id === id ? { ...p, status: 'paid' } : p),
+            transactions: [newTx, ...state.transactions],
+            accounts: { ...state.accounts, chaseDebit: state.accounts.chaseDebit + item.amount },
+          }
+        })
+        get().addToast("Wife's Due received — balance updated", 'success')
+      },
+      addPendingIncome: (item) => {
+        set((state) => ({ pendingIncome: [...state.pendingIncome, { ...item, id: generateId() }] }))
+      },
+      removePendingIncome: (id) => {
+        set((state) => ({ pendingIncome: state.pendingIncome.filter(p => p.id !== id) }))
+      },
 
       // ─── TRANSACTIONS ─────────────────────────────────────────
       transactions: v3Transactions,
@@ -583,34 +604,21 @@ export const useStore = create(
     }),
     {
       name: 'edwin-financial-hub',
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         if (version < 2) {
           persisted = { ...persisted, accounts: { ...persisted.accounts, chaseDebit: 389.82 } }
         }
         if (version < 3) {
-          // Balance
           const accounts = { ...persisted.accounts, chaseDebit: 1960.27 }
-
-          // TILT — mark repaid
-          const tiltLogs = (persisted.tiltLogs || defaultTiltLogs).map(l =>
-            l.id === 'tilt-1'
-              ? { ...l, status: 'repaid', repaidAt: '2026-05-29' }
-              : l
+          const tiltLogs = (persisted.tiltLogs || []).map(l =>
+            l.id === 'tilt-1' ? { ...l, status: 'repaid', repaidAt: '2026-05-29' } : l
           )
-
-          // EarnIn — replace with updated cycles
           const earnInLogs = defaultEarnInLogs
-
-          // Bills — remove Oliver Food (bill-16)
           const bills = (persisted.bills || defaultBills).filter(b => b.id !== 'bill-16')
-
-          // Transactions — merge, skip any that already exist by id
           const existingIds = new Set((persisted.transactions || []).map(t => t.id))
           const newTxs = v3Transactions.filter(t => !existingIds.has(t.id))
           const transactions = [...newTxs, ...(persisted.transactions || [])]
-
-          // Paychecks — add May 1/8/15, update May 22 & 29 amounts
           const existingPaycheckIds = new Set((persisted.paychecks || []).map(p => p.id))
           const addedPast = v3NewPaychecks.filter(p => !existingPaycheckIds.has(p.id))
           const updatedPaychecks = (persisted.paychecks || generatePaychecks()).map(p => {
@@ -619,24 +627,74 @@ export const useStore = create(
             return p
           })
           const paychecks = [...addedPast, ...updatedPaychecks]
-
-          // Afterpay — apply correct payment statuses
           const afterpayItems = defaultAfterPayItems
-
-          // Projected balance override
           const projectedBalance = 2469.45
+          persisted = { ...persisted, accounts, tiltLogs, earnInLogs, bills, transactions, paychecks, afterpayItems, projectedBalance }
+        }
+        if (version < 4) {
+          // Balance update
+          const accounts = { ...persisted.accounts, chaseDebit: 1971.32 }
 
-          persisted = {
-            ...persisted,
-            accounts,
-            tiltLogs,
-            earnInLogs,
-            bills,
-            transactions,
-            paychecks,
-            afterpayItems,
-            projectedBalance,
-          }
+          // TILT — clear all logs
+          const tiltLogs = []
+
+          // EarnIn — current cycle active (all 4 taken), remove future cycles
+          const earnInLogs = [
+            {
+              id: 'earnin-1',
+              cycleStartDate: '2026-05-29',
+              fri_taken: true,
+              sat_taken: true,
+              sun_taken: true,
+              mon_taken: true,
+              amounts: { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 },
+              repaymentAmount: 521.96,
+              status: 'active',
+            },
+          ]
+
+          // Bills — rent due day 1→3, keep everything else
+          const bills = (persisted.bills || defaultBills).map(b =>
+            b.id === 'bill-7' ? { ...b, dueDay: 3, note: 'Due Jun 3' } : b
+          )
+
+          // Transactions — remove any June 1 rent/housing payment; update tax return
+          const transactions = (persisted.transactions || [])
+            .filter(t => !(
+              t.date === '2026-06-01' &&
+              t.type === 'out' &&
+              (t.category === 'Housing' || (t.note && t.note.toLowerCase().includes('rent')))
+            ))
+            .map(t => {
+              if (t.amount === 1140 && t.type === 'in') {
+                return { ...t, note: 'Tax Return', category: 'Income' }
+              }
+              return t
+            })
+
+          // Pending income — add Wife's Due if not already there
+          const existingPending = persisted.pendingIncome || []
+          const pendingIncome = existingPending.some(p => p.id === 'pending-1')
+            ? existingPending
+            : [
+                ...existingPending,
+                {
+                  id: 'pending-1',
+                  label: "Wife's Due",
+                  amount: 224.57,
+                  details: [
+                    { desc: 'Zelle from Father', amount: 150.00 },
+                    { desc: 'Zelle from Father', amount: 37.00 },
+                    { desc: 'Hot Topic', amount: 12.57 },
+                    { desc: 'Additional', amount: 25.00 },
+                  ],
+                  note: 'More owed, amount pending confirmation',
+                  status: 'pending',
+                  createdAt: '2026-06-02',
+                },
+              ]
+
+          persisted = { ...persisted, accounts, tiltLogs, earnInLogs, bills, transactions, pendingIncome }
         }
         return persisted
       },
@@ -653,6 +711,7 @@ export const useStore = create(
         debts: state.debts,
         savingsGoals: state.savingsGoals,
         settings: state.settings,
+        pendingIncome: state.pendingIncome,
       }),
     }
   )
