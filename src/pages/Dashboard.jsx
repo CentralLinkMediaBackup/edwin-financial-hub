@@ -140,13 +140,14 @@ function greeting() {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
-  const accounts     = useStore(s => s.accounts)
-  const transactions = useStore(s => s.transactions)
-  const bills        = useStore(s => s.bills)
-  const paychecks    = useStore(s => s.paychecks)
-  const tiltLogs     = useStore(s => s.tiltLogs)
-  const earnInLogs   = useStore(s => s.earnInLogs)
-  const afterpayItems = useStore(s => s.afterpayItems)
+  const accounts        = useStore(s => s.accounts)
+  const transactions    = useStore(s => s.transactions)
+  const bills           = useStore(s => s.bills)
+  const paychecks       = useStore(s => s.paychecks)
+  const tiltLogs        = useStore(s => s.tiltLogs)
+  const earnInLogs      = useStore(s => s.earnInLogs)
+  const afterpayItems   = useStore(s => s.afterpayItems)
+  const projectedBalance = useStore(s => s.projectedBalance)
 
   const today = new Date()
 
@@ -381,8 +382,8 @@ export default function Dashboard() {
               >
                 <div>
                   <p className="text-xs text-slate-500">Projected end of {format(today, 'MMMM')}</p>
-                  <p className={`text-lg font-bold font-mono mt-0.5 ${projectedEOM < 0 ? 'text-red-400' : 'text-slate-200'}`}>
-                    {formatCurrency(projectedEOM)}
+                  <p className={`text-lg font-bold font-mono mt-0.5 ${(projectedBalance ?? projectedEOM) < 0 ? 'text-red-400' : 'text-slate-200'}`}>
+                    {formatCurrency(projectedBalance ?? projectedEOM)}
                   </p>
                 </div>
                 <div className="text-right">
