@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Sidebar } from './Sidebar'
@@ -20,6 +20,7 @@ const pageTransition = {
 export function Layout({ children }) {
   const location = useLocation()
   const theme = useStore((s) => s.theme)
+  const mainRef = useRef(null)
 
   // Apply theme class to html element
   useEffect(() => {
@@ -33,12 +34,18 @@ export function Layout({ children }) {
     }
   }, [theme])
 
+  // Scroll to top on every tab/route change
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0
+  }, [location.pathname])
+
   return (
     <div className="flex h-screen overflow-hidden relative" style={{ zIndex: 1 }}>
       <Sidebar />
 
       {/* Main content area */}
       <main
+        ref={mainRef}
         className="flex-1 overflow-y-auto relative"
         style={{ backgroundColor: 'var(--bg-primary)' }}
       >

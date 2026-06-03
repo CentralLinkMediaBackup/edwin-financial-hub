@@ -493,10 +493,16 @@ function saveChatHistory(messages) {
   }
 }
 
+const BLANK_MESSAGE = {
+  role: 'assistant',
+  content: "Hi Edwin! I'm your AI financial assistant. Ask me anything about your finances.",
+  timestamp: Date.now(),
+}
+
 export function AIAssistant() {
   const [isOpen, setIsOpen] = useState(false)
   const [showChips, setShowChips] = useState(false)
-  const [messages, setMessages] = useState(loadChatHistory)
+  const [messages, setMessages] = useState([BLANK_MESSAGE])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [noticeText, setNoticeText] = useState('')
@@ -504,9 +510,17 @@ export function AIAssistant() {
   const inputRef = useRef(null)
   const store = useStore()
 
-  useEffect(() => {
-    saveChatHistory(messages)
-  }, [messages])
+  // Clear chat history every time the user closes the panel
+  const handleClose = () => {
+    localStorage.removeItem(CHAT_STORAGE_KEY)
+    setMessages([{ ...BLANK_MESSAGE, timestamp: Date.now() }])
+    setInput('')
+    setNoticeText('')
+    setShowChips(false)
+    setIsOpen(false)
+  }
+
+  // Do not persist between sessions — no useEffect saving to localStorage
 
   useEffect(() => {
     if (isOpen) {
@@ -738,7 +752,7 @@ export function AIAssistant() {
                   <Trash2 size={15} />
                 </button>
                 <button
-                  onClick={() => setIsOpen(false)}
+                  onClick={handleClose}
                   className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
                 >
                   <X size={15} />
@@ -916,7 +930,7 @@ export function AIAssistant() {
         )}
 
         <motion.button
-          onClick={() => { setIsOpen(!isOpen); setShowChips(false) }}
+          onClick={() => { if (isOpen) handleClose(); else { setIsOpen(true); setShowChips(false) } }}
           onHoverStart={() => !isOpen && setShowChips(true)}
           onHoverEnd={() => !isOpen && setShowChips(false)}
           whileHover={{ scale: 1.08 }}

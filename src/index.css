@@ -183,3 +183,41 @@ html.light .font-mono { color: inherit; }
 /* ── Modal backdrops ─────────────────────────────────────────────────────────── */
 /* Backdrop stays dark regardless of theme */
 html.light .bg-black\/60 { background-color: rgba(0,0,0,0.5) !important; }
+
+/* ── Select / dropdown option visibility ──────────────────────────────────────
+   Native <option> elements don't inherit component CSS in most browsers.
+   color-scheme tells the browser to render the picker in dark or light mode.
+   The explicit option rules cover browsers that support them (Firefox/Edge).
+   ─────────────────────────────────────────────────────────────────────────── */
+select { color-scheme: dark; }
+html.light select { color-scheme: light; }
+
+select option {
+  background-color: #0F1629;
+  color: #F1F5F9;
+}
+html.light select option {
+  background-color: #FFFFFF;
+  color: #0F172A;
+}
+
+/* ── Recharts tooltip — readable in both modes ────────────────────────────── */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #1E3A5F !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+  border-radius: 8px !important;
+  color: #FFFFFF !important;
+}
+.recharts-tooltip-wrapper .recharts-default-tooltip .recharts-tooltip-label,
+.recharts-tooltip-wrapper .recharts-default-tooltip .recharts-tooltip-item {
+  color: #FFFFFF !important;
+}
+html.light .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #1E293B !important;
+  border: 1px solid rgba(255,255,255,0.25) !important;
+  color: #FFFFFF !important;
+}
+html.light .recharts-tooltip-wrapper .recharts-default-tooltip .recharts-tooltip-label,
+html.light .recharts-tooltip-wrapper .recharts-default-tooltip .recharts-tooltip-item {
+  color: #FFFFFF !important;
+}

@@ -1,12 +1,12 @@
-import { useMemo } from 'react'
-import { motion } from 'framer-motion'
+import { useMemo, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { Link } from 'react-router-dom'
 import {
   Wallet, CalendarDays, TrendingUp, TrendingDown, AlertTriangle,
   ArrowRight, Zap, CheckCircle2, Circle, DollarSign,
   Utensils, Car, HeartPulse, MoreHorizontal, ShoppingCart, CreditCard,
-  ReceiptText, Clock, ChevronRight
+  ReceiptText, Clock, ChevronRight, ChevronDown, ChevronUp
 } from 'lucide-react'
 import {
   format, parseISO, isAfter, isBefore, addDays,
@@ -140,14 +140,18 @@ function greeting() {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
-  const accounts        = useStore(s => s.accounts)
-  const transactions    = useStore(s => s.transactions)
-  const bills           = useStore(s => s.bills)
-  const paychecks       = useStore(s => s.paychecks)
-  const tiltLogs        = useStore(s => s.tiltLogs)
-  const earnInLogs      = useStore(s => s.earnInLogs)
-  const afterpayItems   = useStore(s => s.afterpayItems)
+  const accounts         = useStore(s => s.accounts)
+  const transactions     = useStore(s => s.transactions)
+  const bills            = useStore(s => s.bills)
+  const paychecks        = useStore(s => s.paychecks)
+  const tiltLogs         = useStore(s => s.tiltLogs)
+  const earnInLogs       = useStore(s => s.earnInLogs)
+  const afterpayItems    = useStore(s => s.afterpayItems)
   const projectedBalance = useStore(s => s.projectedBalance)
+  const theme            = useStore(s => s.theme)
+
+  const [expandedCategory, setExpandedCategory] = useState(null)
+  const [expandedMonthSection, setExpandedMonthSection] = useState(null)
 
   const today = new Date()
 
@@ -186,14 +190,70 @@ export default function Dashboard() {
     return proj
   }, [totalBalance, paychecks, bills])
 
-  // Spending by category
+  // Spending by category — deduplicated by Map
   const spendingByCategory = useMemo(() => {
-    const cats = {}
+    const catMap = new Map()
     transactions
       .filter(t => t.type === 'out' && isSameMonth(parseISO(t.date), today))
-      .forEach(t => { cats[t.category] = (cats[t.category] || 0) + t.amount })
-    return Object.entries(cats).map(([name, value]) => ({ name, value }))
+      .forEach(t => {
+        const cat = (t.category || 'Other').trim() || 'Other'
+        catMap.set(cat, (catMap.get(cat) || 0) + t.amount)
+      })
+    return Array.from(catMap.entries()).map(([name, value]) => ({ name, value }))
   }, [transactions])
+
+  // Per-category transaction lists (for tooltip + expansion)
+  const transactionsByCategory = useMemo(() => {
+    const map = {}
+    transactions
+      .filter(t => t.type === 'out' && isSameMonth(parseISO(t.date), today))
+      .forEach(t => {
+        const cat = (t.category || 'Other').trim() || 'Other'
+        if (!map[cat]) map[cat] = []
+        map[cat].push(t)
+      })
+    return map
+  }, [transactions])
+
+  // Income breakdown for "This Month" dropdown
+  const monthIncomeItems = useMemo(() => ({
+    paychecks: paychecks.filter(p => isSameMonth(parseISO(p.date), today) && p.received),
+    transactions: transactions.filter(t => t.type === 'in' && isSameMonth(parseISO(t.date), today)),
+  }), [transactions, paychecks])
+
+  // Outgoing breakdown for "This Month" dropdown (by category)
+  const monthOutgoingItems = useMemo(() => {
+    const byCategory = {}
+    transactions
+      .filter(t => t.type === 'out' && isSameMonth(parseISO(t.date), today))
+      .forEach(t => {
+        const cat = t.category || 'Other'
+        if (!byCategory[cat]) byCategory[cat] = []
+        byCategory[cat].push(t)
+      })
+    return byCategory
+  }, [transactions])
+
+  // Custom donut tooltip — shows individual transactions per category
+  const tooltipBg = theme === 'dark' ? '#1E3A5F' : '#1E293B'
+  const renderPieTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null
+    const catName = payload[0]?.name || ''
+    const total   = payload[0]?.value || 0
+    const txs     = transactionsByCategory[catName] || []
+    return (
+      <div style={{ background: tooltipBg, color: '#FFF', borderRadius: 8, padding: '8px 12px', maxWidth: 220, border: '1px solid rgba(255,255,255,0.2)', fontSize: 11 }}>
+        <p style={{ fontWeight: 700, marginBottom: 4, fontSize: 12 }}>{catName} — {formatCurrency(total)}</p>
+        {txs.slice(0, 6).map(t => (
+          <p key={t.id} style={{ color: '#CBD5E1', margin: '2px 0' }}>
+            {t.note || catName} −{formatCurrency(t.amount)}
+          </p>
+        ))}
+        {txs.length > 6 && <p style={{ color: '#94A3B8', marginTop: 2 }}>+{txs.length - 6} more · click to expand</p>}
+        {txs.length <= 6 && txs.length > 0 && <p style={{ color: '#94A3B8', marginTop: 2 }}>click to expand</p>}
+      </div>
+    )
+  }
 
   // Upcoming 7 days
   const upcomingPayments = useMemo(() => {
@@ -444,11 +504,18 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-500 uppercase tracking-wide mb-3">This Month</p>
                 <div className="flex items-center gap-4">
                   <div className="flex-1">
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-400">Income</span>
+                    {/* Income row — clickable */}
+                    <button
+                      onClick={() => setExpandedMonthSection(s => s === 'income' ? null : 'income')}
+                      className="w-full flex justify-between text-xs mb-1 hover:opacity-80 transition-opacity"
+                    >
+                      <span className="text-slate-400 flex items-center gap-1">
+                        Income
+                        {expandedMonthSection === 'income' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                      </span>
                       <span className="text-emerald-400 font-mono">+{formatCurrency(monthlyStats.income)}</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-white/5 mb-2.5">
+                    </button>
+                    <div className="h-1.5 rounded-full bg-white/5 mb-1">
                       <motion.div
                         className="h-full rounded-full bg-emerald-500"
                         initial={{ width: 0 }}
@@ -456,10 +523,48 @@ export default function Dashboard() {
                         transition={{ duration: 1, ease: 'easeOut', delay: 0.5 }}
                       />
                     </div>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-400">Outgoing</span>
+                    {/* Income breakdown dropdown */}
+                    <AnimatePresence>
+                      {expandedMonthSection === 'income' && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22 }}
+                          className="overflow-hidden mb-1.5"
+                        >
+                          <div className="mt-1 mb-1 p-2 rounded-lg text-[10px] space-y-0.5" style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.15)' }}>
+                            {monthIncomeItems.paychecks.map(p => (
+                              <div key={p.id} className="flex justify-between text-slate-300">
+                                <span>{format(parseISO(p.date), 'MMM d')} · {p.source || 'Paycheck'}</span>
+                                <span className="text-emerald-400 font-mono">+{formatCurrency(p.amount)}</span>
+                              </div>
+                            ))}
+                            {monthIncomeItems.transactions.map(t => (
+                              <div key={t.id} className="flex justify-between text-slate-300">
+                                <span>{format(parseISO(t.date), 'MMM d')} · {t.note || t.category}</span>
+                                <span className="text-emerald-400 font-mono">+{formatCurrency(t.amount)}</span>
+                              </div>
+                            ))}
+                            {monthIncomeItems.paychecks.length === 0 && monthIncomeItems.transactions.length === 0 && (
+                              <p className="text-slate-500">No income logged this month</p>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Outgoing row — clickable */}
+                    <button
+                      onClick={() => setExpandedMonthSection(s => s === 'outgoing' ? null : 'outgoing')}
+                      className="w-full flex justify-between text-xs mb-1 hover:opacity-80 transition-opacity"
+                    >
+                      <span className="text-slate-400 flex items-center gap-1">
+                        Outgoing
+                        {expandedMonthSection === 'outgoing' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                      </span>
                       <span className="text-red-400 font-mono">-{formatCurrency(monthlyStats.outgoing)}</span>
-                    </div>
+                    </button>
                     <div className="h-1.5 rounded-full bg-white/5">
                       <motion.div
                         className="h-full rounded-full bg-red-500"
@@ -468,6 +573,39 @@ export default function Dashboard() {
                         transition={{ duration: 1, ease: 'easeOut', delay: 0.6 }}
                       />
                     </div>
+                    {/* Outgoing breakdown dropdown */}
+                    <AnimatePresence>
+                      {expandedMonthSection === 'outgoing' && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22 }}
+                          className="overflow-hidden mt-1"
+                        >
+                          <div className="p-2 rounded-lg text-[10px] space-y-1" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                            {Object.entries(monthOutgoingItems).sort((a,b) => b[1].reduce((s,t)=>s+t.amount,0) - a[1].reduce((s,t)=>s+t.amount,0)).map(([cat, txs]) => (
+                              <div key={cat}>
+                                <div className="flex justify-between text-slate-400 font-semibold mb-0.5">
+                                  <span>{cat}</span>
+                                  <span className="text-red-400 font-mono">-{formatCurrency(txs.reduce((s,t)=>s+t.amount,0))}</span>
+                                </div>
+                                {txs.slice(0, 4).map(t => (
+                                  <div key={t.id} className="flex justify-between pl-2 text-slate-500">
+                                    <span>{format(parseISO(t.date), 'MMM d')} · {t.note || cat}</span>
+                                    <span className="font-mono">-{formatCurrency(t.amount)}</span>
+                                  </div>
+                                ))}
+                                {txs.length > 4 && <p className="pl-2 text-slate-600">+{txs.length - 4} more</p>}
+                              </div>
+                            ))}
+                            {Object.keys(monthOutgoingItems).length === 0 && (
+                              <p className="text-slate-500">No expenses logged this month</p>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-[10px] text-slate-500 mb-0.5">Net</p>
@@ -708,53 +846,95 @@ export default function Dashboard() {
               </div>
 
               {spendingByCategory.length > 0 ? (
-                <div className="flex items-center gap-4">
-                  <ResponsiveContainer width="42%" height={150}>
-                    <PieChart>
-                      <Pie
-                        data={spendingByCategory}
-                        cx="50%" cy="50%"
-                        innerRadius={42} outerRadius={65}
-                        paddingAngle={3} dataKey="value"
-                        animationBegin={300} animationDuration={1200}
-                      >
-                        {spendingByCategory.map((_, i) => (
-                          <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={v => formatCurrency(v)}
-                        contentStyle={{ backgroundColor: 'var(--bg-panel)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '11px' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="flex-1 space-y-2">
-                    {spendingByCategory.map((cat, i) => {
-                      const total = spendingByCategory.reduce((s, c) => s + c.value, 0)
-                      const pct = total > 0 ? Math.round((cat.value / total) * 100) : 0
-                      return (
-                        <div key={cat.name}>
-                          <div className="flex justify-between text-xs mb-1">
-                            <span className="text-slate-400 flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
-                              {cat.name}
-                            </span>
-                            <span className="text-slate-300 font-mono">{formatCurrency(cat.value)}</span>
+                <>
+                  <div className="flex items-center gap-4">
+                    <ResponsiveContainer width="42%" height={150}>
+                      <PieChart>
+                        <Pie
+                          data={spendingByCategory}
+                          cx="50%" cy="50%"
+                          innerRadius={42} outerRadius={65}
+                          paddingAngle={3} dataKey="value"
+                          animationBegin={300} animationDuration={1200}
+                          onClick={(data) => setExpandedCategory(c => c === data.name ? null : data.name)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          {spendingByCategory.map((_, i) => (
+                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={renderPieTooltip} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-2">
+                      {spendingByCategory.map((cat, i) => {
+                        const total = spendingByCategory.reduce((s, c) => s + c.value, 0)
+                        const pct = total > 0 ? Math.round((cat.value / total) * 100) : 0
+                        const isExpanded = expandedCategory === cat.name
+                        return (
+                          <div key={cat.name}>
+                            <button
+                              onClick={() => setExpandedCategory(c => c === cat.name ? null : cat.name)}
+                              className="w-full text-left"
+                            >
+                              <div className="flex justify-between text-xs mb-1 hover:opacity-80 transition-opacity">
+                                <span className="text-slate-400 flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                                  {cat.name}
+                                  {isExpanded ? <ChevronUp size={9} /> : <ChevronDown size={9} />}
+                                </span>
+                                <span className="text-slate-300 font-mono">{formatCurrency(cat.value)}</span>
+                              </div>
+                              <div className="h-1 rounded-full bg-white/5">
+                                <motion.div
+                                  className="h-full rounded-full"
+                                  style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${pct}%` }}
+                                  transition={{ duration: 0.8, delay: 0.3 + i * 0.08 }}
+                                />
+                              </div>
+                            </button>
                           </div>
-                          <div className="h-1 rounded-full bg-white/5">
-                            <motion.div
-                              className="h-full rounded-full"
-                              style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${pct}%` }}
-                              transition={{ duration: 0.8, delay: 0.3 + i * 0.08 }}
-                            />
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Category transaction expansion panel */}
+                  <AnimatePresence>
+                    {expandedCategory && transactionsByCategory[expandedCategory] && (
+                      <motion.div
+                        key={expandedCategory}
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25 }}
+                        className="overflow-hidden mt-3"
+                      >
+                        <div className="pt-3 border-t border-white/10">
+                          <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mb-2">
+                            {expandedCategory} — {format(today, 'MMMM')} transactions
+                          </p>
+                          <div className="space-y-1 max-h-36 overflow-y-auto">
+                            {transactionsByCategory[expandedCategory].map(t => (
+                              <div key={t.id} className="flex justify-between text-xs">
+                                <span className="text-slate-400">{format(parseISO(t.date), 'MMM d')} · {t.note || t.category}</span>
+                                <span className="text-slate-300 font-mono flex-shrink-0 ml-2">-{formatCurrency(t.amount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-2 pt-2 border-t border-white/5 flex justify-between text-xs">
+                            <span className="text-slate-500">Total</span>
+                            <span className="text-slate-200 font-mono font-semibold">
+                              -{formatCurrency(transactionsByCategory[expandedCategory].reduce((s,t)=>s+t.amount,0))}
+                            </span>
                           </div>
                         </div>
-                      )
-                    })}
-                  </div>
-                </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-500">
                   <ShoppingCart size={24} className="opacity-30" />

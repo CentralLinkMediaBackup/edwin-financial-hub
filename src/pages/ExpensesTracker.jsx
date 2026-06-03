@@ -200,6 +200,7 @@ export default function ExpensesTracker() {
   const transactions = useStore(s => s.transactions)
   const deleteTransaction = useStore(s => s.deleteTransaction)
   const pendingIncome = useStore(s => s.pendingIncome)
+  const theme = useStore(s => s.theme)
   const markPendingPaid = useStore(s => s.markPendingPaid)
 
   const pendingItems = pendingIncome?.filter(p => p.status === 'pending') || []
@@ -232,11 +233,15 @@ export default function ExpensesTracker() {
   }), [filtered])
 
   const categoryBreakdown = useMemo(() => {
-    const cats = {}
+    // Use a Map to guarantee exactly one bar per category name
+    const catMap = new Map()
     filtered.filter(t => t.type === 'out').forEach(t => {
-      cats[t.category] = (cats[t.category] || 0) + t.amount
+      const cat = (t.category || 'Other').trim() || 'Other'
+      catMap.set(cat, (catMap.get(cat) || 0) + t.amount)
     })
-    return Object.entries(cats).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
+    return Array.from(catMap.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
   }, [filtered])
 
   const exportCSV = () => {
@@ -348,7 +353,15 @@ export default function ExpensesTracker() {
               <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#94A3B8' }} width={90} axisLine={false} tickLine={false} />
               <Tooltip
                 formatter={(v) => formatCurrency(v)}
-                contentStyle={{ backgroundColor: '#0F1629', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#F1F5F9', fontSize: '12px' }}
+                contentStyle={{
+                  backgroundColor: theme === 'dark' ? '#1E3A5F' : '#1E293B',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '8px',
+                  color: '#FFFFFF',
+                  fontSize: '12px',
+                }}
+                itemStyle={{ color: '#FFFFFF' }}
+                labelStyle={{ color: '#FFFFFF', fontWeight: 600 }}
               />
               <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={20}>
                 {categoryBreakdown.map((entry, i) => (

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Settings as SettingsIcon, Moon, Sun, Save, Download, Trash2, X, Check, User, CreditCard } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -46,6 +46,11 @@ export default function Settings() {
   const [localSettings, setLocalSettings] = useState(settings)
   const [localAccounts, setLocalAccounts] = useState({ ...accounts })
   const [clearConfirm, setClearConfirm] = useState(false)
+
+  // Keep displayed balances in sync when transactions update the store
+  useEffect(() => {
+    setLocalAccounts({ ...accounts })
+  }, [accounts])
 
   const totalBalance = Object.values(localAccounts).reduce((a, b) => a + Number(b), 0)
 
