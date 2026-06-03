@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bot, X, Send, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
-import { formatCurrency, formatDate } from '../../lib/formatters'
-import { format, addDays, parseISO } from 'date-fns'
+import { formatCurrency } from '../../lib/formatters'
+import { format, addDays, parseISO, isSameMonth } from 'date-fns'
 import { callClaudeProxy } from '../../lib/claude'
 
 const CHAT_STORAGE_KEY  = 'eb-financial-hub-chat'
@@ -112,224 +112,346 @@ const CLAUDE_TOOLS = [
 ]
 
 // ─── buildSystemPrompt ────────────────────────────────────────────────────────
-// Preserved exactly — no changes to the financial logic.
+// Called via useStore.getState() on every send — always fresh, never cached.
 function buildSystemPrompt(store) {
-  const today = new Date()
+  const today    = new Date()
   const todayStr = format(today, 'EEEE, MMMM d yyyy')
-  const accounts = store.accounts
-  const totalBalance = Object.values(accounts).reduce((a, b) => a + b, 0)
 
-  const activeBills = (store.bills || []).filter(b => b.isActive)
-  const monthlyTotal = activeBills.filter(b => b.frequency === 'monthly').reduce((s, b) => s + b.amount, 0)
-  const billsList = activeBills.map(b =>
-    `  - ${b.name}: $${b.amount.toFixed(2)} due ${b.dueDay ? `on ${b.dueDay}` : 'flexible'}`
-  ).join('\n')
+  // ── Accounts ──────────────────────────────────────────────────────────────
+  const accounts       = store.accounts || {}
+  const chaseDebit     = accounts.chaseDebit      || 0
+  const capitalOne     = accounts.capitalOneDebit || 0
+  const cashApp        = accounts.cashApp         || 0
+  const paypal         = accounts.paypal          || 0
+  const totalBalance   = chaseDebit + capitalOne + cashApp + paypal
 
-  const upcomingPaychecks = (store.paychecks || [])
-    .filter(p => !p.isOneTime && parseISO(p.date) >= today)
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(0, 3)
-  const paycheckList = upcomingPaychecks.map(p =>
-    `  - ${format(parseISO(p.date), 'EEE MMM d')}: $${p.amount.toFixed(2)} from ${p.source || 'Employment'}`
-  ).join('\n') || '  - None scheduled'
+  // ── Settings ────────────────────────────────────────────────────────────────
+  const settings       = store.settings    || {}
+  const earnInSettings = settings.earnIn   || {}
+  const tiltSettings   = settings.tilt     || {}
+  const pcSettings     = settings.paycheck || {}
+  const tiltMaxCredit  = tiltSettings.maxCredit   || 400
+  const tiltFee        = tiltSettings.instantFee  || 12
 
-  const activeTilt = (store.tiltLogs || []).find(l => l.status === 'active')
-  const tiltStatus = activeTilt
-    ? `ACTIVE — $${activeTilt.amountUsed} used, repayment due ${activeTilt.repaymentDate}`
-    : 'CLEAR (no active advances)'
-
+  // ── EarnIn ──────────────────────────────────────────────────────────────────
   const activeEarnIn = (store.earnInLogs || []).find(l => l.status === 'active')
-  const earnInStatus = activeEarnIn
-    ? `Active cycle (started ${activeEarnIn.cycleStartDate}).
-  Steps: Fri: ${activeEarnIn.fri_taken ? `TAKEN ($${activeEarnIn.amounts?.fri ?? 155.99})` : 'not taken'}, Sat: ${activeEarnIn.sat_taken ? `TAKEN ($${activeEarnIn.amounts?.sat ?? 155.99})` : 'not taken'}, Sun: ${activeEarnIn.sun_taken ? `TAKEN ($${activeEarnIn.amounts?.sun ?? 155.99})` : 'not taken'}, Mon: ${activeEarnIn.mon_taken ? `TAKEN ($${activeEarnIn.amounts?.mon ?? 53.99})` : 'not taken'}.
-  Repayment: $${activeEarnIn.repaymentAmount || 521.96}`
-    : 'No active cycle'
+  const pastEarnIn   = (store.earnInLogs || []).filter(l => l.status !== 'active')
+  const EARNIN_DAYS  = [
+    { key: 'fri', label: 'Friday',   offset: 0 },
+    { key: 'sat', label: 'Saturday', offset: 1 },
+    { key: 'sun', label: 'Sunday',   offset: 2 },
+    { key: 'mon', label: 'Monday',   offset: 3 },
+  ]
 
-  const afterpayLines = (store.afterpayItems || []).flatMap(item =>
-    item.payments
-      .filter(p => p.status !== 'paid')
-      .map(p => `  - ${item.name} #${p.number}: $${p.amount.toFixed(2)} due ${p.dueDate}`)
-  ).join('\n') || '  - None'
-
-  const totalDebt  = (store.debts || []).reduce((s, d) => s + d.totalBalance, 0)
-  const totalSaved = (store.savingsGoals || []).reduce((s, g) => s + (g.currentAmount || 0), 0)
-
-  const eventMap = {}
-  const addEvent = (dateStr, label, amount) => {
-    if (!eventMap[dateStr]) eventMap[dateStr] = []
-    eventMap[dateStr].push({ label, amount })
-  }
-
+  let earnInSection = 'EARN IN — CURRENT CYCLE: No active cycle.'
+  let earnInRepayDate = null
+  let earnInRepayAmt  = 0
   if (activeEarnIn) {
-    const daysConfig = [
-      { key: 'fri', offset: 0, amount: activeEarnIn.amounts?.fri ?? 155.99, takenKey: 'fri_taken' },
-      { key: 'sat', offset: 1, amount: activeEarnIn.amounts?.sat ?? 155.99, takenKey: 'sat_taken' },
-      { key: 'sun', offset: 2, amount: activeEarnIn.amounts?.sun ?? 155.99, takenKey: 'sun_taken' },
-      { key: 'mon', offset: 3, amount: activeEarnIn.amounts?.mon ?? 53.99,  takenKey: 'mon_taken' },
-    ]
     const cycleStart = parseISO(activeEarnIn.cycleStartDate)
-    daysConfig.forEach(d => {
-      if (activeEarnIn[d.takenKey]) {
-        const dateStr = format(addDays(cycleStart, d.offset), 'yyyy-MM-dd')
-        addEvent(dateStr, `EarnIn ${d.key.charAt(0).toUpperCase() + d.key.slice(1)} withdrawal`, +d.amount)
-      }
-    })
-    const repayDate = format(addDays(cycleStart, 7), 'yyyy-MM-dd')
-    addEvent(repayDate, 'EarnIn Repayment', -(activeEarnIn.repaymentAmount || 521.96))
+    earnInRepayDate  = format(addDays(cycleStart, 7), 'yyyy-MM-dd')
+    earnInRepayAmt   = activeEarnIn.repaymentAmount || earnInSettings.repaymentAmount || 521.96
+    let totalTaken   = 0
+    const dayLines   = EARNIN_DAYS.map(d => {
+      const taken = activeEarnIn[`${d.key}_taken`]
+      const amt   = activeEarnIn.amounts?.[d.key] ?? earnInSettings[d.key] ?? 0
+      const date  = format(addDays(cycleStart, d.offset), 'MMM d')
+      if (taken) totalTaken += amt
+      return `  - ${d.label} ${date}: ${taken ? `TAKEN +$${amt.toFixed(2)}` : `not taken ($${amt.toFixed(2)} available)`}`
+    }).join('\n')
+    const net = totalTaken - earnInRepayAmt
+    earnInSection = `EARN IN — CURRENT CYCLE:
+  Cycle Start: ${format(cycleStart, 'EEEE, MMM d yyyy')}
+  Repayment Due: ${format(parseISO(earnInRepayDate), 'EEEE, MMM d yyyy')} — $${earnInRepayAmt.toFixed(2)}
+  Status: Active
+${dayLines}
+  Total Taken This Cycle: $${totalTaken.toFixed(2)}
+  Running Net (taken - repayment): $${net.toFixed(2)} ${net < 0 ? '(net loss)' : '(net gain)'}`
+  }
+  if (pastEarnIn.length > 0) {
+    const hist = pastEarnIn.slice(0, 3).map(l => {
+      const t = EARNIN_DAYS.reduce((s, d) => s + (l[`${d.key}_taken`] ? (l.amounts?.[d.key] || 0) : 0), 0)
+      return `  - Cycle ${l.cycleStartDate}: took $${t.toFixed(2)}, repayment $${l.repaymentAmount || 521.96}, status: ${l.status}`
+    }).join('\n')
+    earnInSection += `\n\nEARN IN — PAST CYCLES (most recent 3):\n${hist}`
   }
 
+  // ── TILT ────────────────────────────────────────────────────────────────────
+  const activeTilt = (store.tiltLogs || []).find(l => l.status === 'active')
+  const pastTilts  = (store.tiltLogs || []).filter(l => l.status !== 'active')
+  let tiltSection  = activeTilt
+    ? `TILT STATUS: ACTIVE
+  Amount Used: $${activeTilt.amountUsed} / $${tiltMaxCredit}
+  Amount Available: $${tiltMaxCredit - activeTilt.amountUsed}
+  Repayment Due: ${activeTilt.repaymentDate}
+  Repayment Plan: Option ${activeTilt.repaymentOption || 'A'}
+  Delivery: ${activeTilt.instantDelivery ? `Instant (fee -$${activeTilt.instantFee || tiltFee})` : 'Standard'}
+  Note: ${activeTilt.note || 'N/A'}`
+    : `TILT STATUS: CLEAR — $${tiltMaxCredit} available, $0 owed`
+  tiltSection += pastTilts.length > 0
+    ? '\nTILT HISTORY:\n' + pastTilts.slice(0, 5).map(l =>
+        `  - ${l.createdAt?.slice(0,10) || '?'}: $${l.amountUsed} used, repaid ${l.repaidAt?.slice(0,10) || 'unknown'}`
+      ).join('\n')
+    : '\nTILT HISTORY: No past advances.'
+
+  // ── Afterpay ────────────────────────────────────────────────────────────────
+  const afterpayItems = store.afterpayItems || []
+  let totalAfterRemaining = 0
+  let nextApDate = null
+  let nextApAmt  = 0
+  const afterpaySection = afterpayItems.length > 0
+    ? afterpayItems.map(item => {
+        const pmts      = item.payments || []
+        const remaining = pmts.filter(p => p.status !== 'paid').reduce((s, p) => s + p.amount, 0)
+        totalAfterRemaining += remaining
+        const next = pmts.filter(p => p.status !== 'paid').sort((a,b) => a.dueDate.localeCompare(b.dueDate))[0]
+        if (next && (!nextApDate || next.dueDate < nextApDate)) { nextApDate = next.dueDate; nextApAmt = next.amount }
+        return `  ${item.name} | Total: $${(pmts.reduce((s,p)=>s+p.amount,0)).toFixed(2)} | Remaining: $${remaining.toFixed(2)}\n`
+          + pmts.map(p => `    Payment ${p.number}: $${p.amount.toFixed(2)} on ${p.dueDate} — ${p.status === 'paid' ? `PAID ${p.paidDate||''}` : 'UPCOMING'}`).join('\n')
+      }).join('\n\n')
+    : '  No active Afterpay plans.'
+
+  // ── Bills / Subscriptions ────────────────────────────────────────────────────
+  const allBills    = store.bills || []
+  const activeBills = allBills.filter(b => b.isActive)
+  const monthlyBills = activeBills.filter(b => b.frequency === 'monthly')
+  const monthlyTotal = monthlyBills.reduce((s, b) => s + b.amount, 0)
+  const todayDay = today.getDate()
+  const sortedBills = [...activeBills].sort((a, b) => {
+    const dA = a.dueDay != null ? (a.dueDay >= todayDay ? a.dueDay - todayDay : 32 - todayDay + a.dueDay) : 999
+    const dB = b.dueDay != null ? (b.dueDay >= todayDay ? b.dueDay - todayDay : 32 - todayDay + b.dueDay) : 999
+    return dA - dB
+  })
+  const nextBill = sortedBills.find(b => b.dueDay != null)
+  const billLines = activeBills.map(b => {
+    const yr = today.getFullYear(); const mo = today.getMonth()
+    const nextDue = b.dueDay
+      ? (b.dueDay >= todayDay
+          ? format(new Date(yr, mo,     b.dueDay), 'MMM d')
+          : format(new Date(yr, mo + 1, b.dueDay), 'MMM d'))
+      : 'Flexible'
+    return `  - ${b.name} (${b.category}): $${b.amount.toFixed(2)} | ${b.frequency} | due ${nextDue}${b.paidThisMonth ? ' PAID THIS MONTH' : ''}`
+  }).join('\n')
+
+  // ── Paychecks ────────────────────────────────────────────────────────────────
+  const allPaychecks = store.paychecks || []
+  const in30days = addDays(today, 30)
+  const upcomingPc = allPaychecks
+    .filter(p => { try { const d=parseISO(p.date); return d>=today && d<=in30days && !p.isOneTime } catch{return false} })
+    .sort((a,b) => a.date.localeCompare(b.date))
+  const pastPc = allPaychecks
+    .filter(p => { try { return parseISO(p.date)<today && !p.isOneTime } catch{return false} })
+    .sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8)
+  const projectedPcIncome = upcomingPc.reduce((s,p) => s+p.amount, 0)
+  const nextPc = upcomingPc[0]
+  const oneTimeTxs = (store.transactions||[]).filter(t => t.isOneTime && t.type==='in')
+
+  // ── Transactions ─────────────────────────────────────────────────────────────
+  const allTxs = store.transactions || []
+  const monthTxs = allTxs.filter(t => { try { return isSameMonth(parseISO(t.date), today) } catch{return false} })
+  const monthIn  = monthTxs.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount, 0)
+  const monthOut = monthTxs.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount, 0)
+  const catMap   = {}
+  monthTxs.filter(t=>t.type==='out').forEach(t => { catMap[t.category||'Other'] = (catMap[t.category||'Other']||0)+t.amount })
+  const catLines = Object.entries(catMap).sort((a,b)=>b[1]-a[1])
+    .map(([c,a])=>`  - ${c}: $${a.toFixed(2)}`).join('\n') || '  - None'
+  const recentTxLines = [...allTxs].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,15)
+    .map(t=>`  - ${t.date} | ${t.type==='in'?'+':'-'}$${t.amount.toFixed(2)} | ${t.category} | ${t.note||'—'}`).join('\n')
+
+  // ── Pending Income ────────────────────────────────────────────────────────────
+  const pendingIncome = store.pendingIncome || []
+  const pendingLines = pendingIncome.length > 0
+    ? pendingIncome.map(p =>
+        `  - ${p.label}: $${p.amount.toFixed(2)} — ${p.status==='paid'?'PAID (counted in balance)':'PENDING — NOT in balance yet'}\n`
+        + `    Breakdown: ${(p.details||[]).map(d=>`${d.desc} $${d.amount.toFixed(2)}`).join(', ')}\n`
+        + `    Note: ${p.note||''}`
+      ).join('\n')
+    : '  - None'
+
+  // ── Debts ────────────────────────────────────────────────────────────────────
+  const debts    = store.debts || []
+  const totalDebt = debts.reduce((s,d)=>s+d.totalBalance, 0)
+  const debtLines = debts.map(d => {
+    const months = d.minimumPayment>0 ? Math.ceil(d.totalBalance/d.minimumPayment) : '∞'
+    return `  - ${d.name}: $${d.totalBalance.toFixed(2)} balance | $${d.minimumPayment}/mo min | APR ${d.apr||0}% | ~${months} mo payoff | ${(d.paymentHistory||[]).length} payments logged`
+  }).join('\n') || '  - No debts logged'
+
+  // ── Savings ──────────────────────────────────────────────────────────────────
+  const savingsGoals = store.savingsGoals || []
+  const totalSaved   = savingsGoals.reduce((s,g)=>s+(g.currentAmount||0), 0)
+  const savingsLines = savingsGoals.length > 0
+    ? savingsGoals.map(g => {
+        const pct = g.targetAmount>0 ? Math.round((g.currentAmount/g.targetAmount)*100) : 0
+        return `  - ${g.name}: $${(g.currentAmount||0).toFixed(2)} / $${(g.targetAmount||0).toFixed(2)} (${pct}%) | Need $${Math.max(0,(g.targetAmount||0)-(g.currentAmount||0)).toFixed(2)} more${g.targetDate?` | Target: ${g.targetDate}`:''}`
+      }).join('\n')
+    : '  - No savings goals'
+
+  // ── 30-Day Projected Daily Balance ────────────────────────────────────────────
+  const eventMap = {}
+  const addEvent = (ds, label, amount) => {
+    if (!eventMap[ds]) eventMap[ds] = []
+    eventMap[ds].push({ label, amount })
+  }
+
+  // Paychecks
+  upcomingPc.forEach(p => addEvent(p.date, `Paycheck (${p.source||'Employment'})`, +p.amount))
+
+  // Bills — monthly only, current + next month
+  const yr = today.getFullYear(); const mo = today.getMonth()
+  activeBills.filter(b => b.dueDay && b.frequency==='monthly').forEach(b => {
+    addEvent(format(new Date(yr, mo,     b.dueDay), 'yyyy-MM-dd'), `Bill: ${b.name}`, -b.amount)
+    addEvent(format(new Date(yr, mo + 1, b.dueDay), 'yyyy-MM-dd'), `Bill: ${b.name}`, -b.amount)
+  })
+
+  // EarnIn repayment (already taken days are past; repayment is upcoming)
+  if (activeEarnIn && earnInRepayDate) addEvent(earnInRepayDate, 'EarnIn Repayment', -earnInRepayAmt)
+
+  // TILT
   if (activeTilt) addEvent(activeTilt.repaymentDate, 'TILT Repayment', -activeTilt.amountUsed)
 
-  upcomingPaychecks.forEach(p => addEvent(p.date, `Paycheck (${p.source || 'Employment'})`, +p.amount))
-
-  const currentMonth = today.getMonth()
-  const currentYear  = today.getFullYear()
-  activeBills.filter(b => b.dueDay).forEach(b => {
-    addEvent(format(new Date(currentYear, currentMonth, b.dueDay), 'yyyy-MM-dd'), `Bill: ${b.name}`, -b.amount)
-    addEvent(format(new Date(currentYear, currentMonth + 1, b.dueDay), 'yyyy-MM-dd'), `Bill: ${b.name}`, -b.amount)
+  // Afterpay
+  afterpayItems.forEach(item => {
+    ;(item.payments||[]).filter(p=>p.status!=='paid').forEach(p => addEvent(p.dueDate, `Afterpay: ${item.name} #${p.number}`, -p.amount))
   })
 
-  ;(store.afterpayItems || []).forEach(item => {
-    item.payments.filter(p => p.status !== 'paid').forEach(p => {
-      addEvent(p.dueDate, `Afterpay ${item.name} #${p.number}`, -p.amount)
-    })
-  })
-
-  let runningBalance = totalBalance
-  const projectionLines = []
-  for (let i = 0; i < 14; i++) {
+  // Groceries: -$60 every Sunday
+  for (let i=0; i<=30; i++) {
     const d = addDays(today, i)
-    const dateStr = format(d, 'yyyy-MM-dd')
-    const label = format(d, 'MMM d (EEE)')
-    const events = eventMap[dateStr] || []
-    let dayDelta = 0
-    const eventDescs = events.map(e => {
-      dayDelta += e.amount
-      return `${e.amount >= 0 ? '+' : ''}$${Math.abs(e.amount).toFixed(2)} ${e.label}`
-    })
-    runningBalance += dayDelta
-    if (i === 0) {
-      projectionLines.push(`  ${label}: Starting $${totalBalance.toFixed(2)}${eventDescs.length ? `, ${eventDescs.join(', ')} → Balance: $${runningBalance.toFixed(2)}` : ''}`)
-    } else {
-      projectionLines.push(
-        eventDescs.length
-          ? `  ${label}: ${eventDescs.join(', ')} → Balance: $${runningBalance.toFixed(2)}`
-          : `  ${label}: $${runningBalance.toFixed(2)}`
-      )
-    }
+    if (d.getDay()===0) addEvent(format(d,'yyyy-MM-dd'), 'Groceries (weekly Sun)', -60)
+  }
+
+  // Gas: -$20 biweekly (day 14 and 28)
+  ;[14,28].forEach(n => addEvent(format(addDays(today,n),'yyyy-MM-dd'), 'Gas (biweekly)', -20))
+
+  // Pending income — only if already marked paid
+  pendingIncome.forEach(p => {
+    if (p.status==='paid') addEvent(format(today,'yyyy-MM-dd'), p.label, +p.amount)
+  })
+
+  // Run projection
+  let runBal  = totalBalance
+  let lowestBal  = totalBalance
+  let lowestDate = format(today,'yyyy-MM-dd')
+  const projLines = []
+  for (let i=0; i<=30; i++) {
+    const d      = addDays(today, i)
+    const ds     = format(d,'yyyy-MM-dd')
+    const lbl    = format(d,'MMM d (EEE)')
+    const evs    = eventMap[ds] || []
+    let delta    = 0
+    const descs  = evs.map(e => { delta+=e.amount; return `${e.amount>=0?'+':'-'}$${Math.abs(e.amount).toFixed(2)} ${e.label}` })
+    runBal      += delta
+    if (runBal < lowestBal) { lowestBal = runBal; lowestDate = ds }
+    const warn   = runBal < 20 ? ' *** BELOW $20 BUFFER ***' : runBal < 100 ? ' (LOW)' : ''
+    projLines.push(
+      descs.length
+        ? `  ${lbl}: ${descs.join(' | ')} → $${runBal.toFixed(2)}${warn}`
+        : `  ${lbl}: $${runBal.toFixed(2)}`
+    )
   }
 
   return `You are Edwin Bernal's personal AI financial assistant inside his Financial Hub app.
-Today is ${todayStr}.
+Today is ${todayStr}. All data below is read live at the moment this message is sent.
 
-FINANCIAL SNAPSHOT:
-- Total Balance: ${formatCurrency(totalBalance)}
-  - Chase Debit: ${formatCurrency(accounts.chaseDebit)}
-  - Capital One Debit: ${formatCurrency(accounts.capitalOneDebit)}
-  - Cash App: ${formatCurrency(accounts.cashApp)}
-  - PayPal: ${formatCurrency(accounts.paypal)}
-- Monthly Bills Total: ${formatCurrency(monthlyTotal)}
-- Total Debt: ${formatCurrency(totalDebt)}
-- Savings: ${formatCurrency(totalSaved)}
+ACCOUNT BALANCES
+  Chase Debit:   $${chaseDebit.toFixed(2)}
+  Capital One:   $${capitalOne.toFixed(2)}
+  Cash App:      $${cashApp.toFixed(2)}
+  PayPal:        $${paypal.toFixed(2)}
+  TOTAL BALANCE: $${totalBalance.toFixed(2)}
 
-ALL BILLS:
-${billsList}
+SETTINGS
+  EarnIn: repayment $${earnInSettings.repaymentAmount||521.96} | Fri $${earnInSettings.fri||155.99} | Sat $${earnInSettings.sat||155.99} | Sun $${earnInSettings.sun||155.99} | Mon $${earnInSettings.mon||53.99}
+  TILT: max credit $${tiltMaxCredit} | instant fee $${tiltFee}
+  Paycheck: default $${pcSettings.defaultAmount||980} | ${pcSettings.frequency||'weekly'} every Friday
 
-UPCOMING PAYCHECKS (next 3):
-${paycheckList}
+${earnInSection}
 
-TILT Status: ${tiltStatus}
+${tiltSection}
 
-EARN IN Status:
-${earnInStatus}
+AFTERPAY — ALL PLANS
+${afterpaySection}
+  Total Remaining Across All Plans: $${totalAfterRemaining.toFixed(2)}
+${nextApDate ? `  Next Payment: $${nextApAmt.toFixed(2)} on ${nextApDate}` : '  No upcoming payments.'}
 
-AFTERPAY UPCOMING PAYMENTS:
-${afterpayLines}
+MONTHLY SUBSCRIPTIONS — ALL ACTIVE (${activeBills.length} bills)
+${billLines}
+  Monthly Total: $${monthlyTotal.toFixed(2)}
+${nextBill ? `  Next Due: ${nextBill.name} $${nextBill.amount.toFixed(2)} on the ${nextBill.dueDay}th` : ''}
 
-DAY-BY-DAY PROJECTION (next 14 days):
-${projectionLines.join('\n')}
+PAYCHECKS — UPCOMING (next 30 days, ${upcomingPc.length} paychecks)
+${upcomingPc.map(p=>`  - ${format(parseISO(p.date),'EEE MMM d')}: $${p.amount.toFixed(2)} from ${p.source||'Employment'}`).join('\n')||'  - None'}
+  Projected Income (30d): $${projectedPcIncome.toFixed(2)}
+${nextPc ? `  Next: $${nextPc.amount.toFixed(2)} on ${format(parseISO(nextPc.date),'EEE MMM d')}` : '  None scheduled.'}
 
-FINANCIAL ADVISOR LOGIC (MANDATORY — follow this EXACT logic every time the user asks if they can afford anything):
+PAYCHECKS — PAST HISTORY
+${pastPc.map(p=>`  - ${format(parseISO(p.date),'EEE MMM d')}: $${p.amount.toFixed(2)} from ${p.source||'Employment'}`).join('\n')||'  - None'}
 
-You are a personal finance advisor embedded in this app. You have full access to all of the user's financial data including current balance, upcoming bills, earn in cycles, tilt status, afterpay payments, paychecks, and all recurring charges.
+ONE-TIME INCOME LOGGED
+${oneTimeTxs.length>0 ? oneTimeTxs.map(t=>`  - ${t.date}: $${t.amount.toFixed(2)} (${t.source||t.note||'One-Time'})`).join('\n') : '  - None'}
 
-When the user asks if they can afford to spend money on anything — food, a purchase, afterpay, anything — follow this exact logic every single time:
+TRANSACTION TRACKER — CURRENT MONTH
+  Month Income:     +$${monthIn.toFixed(2)}
+  Month Expenses:   -$${monthOut.toFixed(2)}
+  Net:              $${(monthIn-monthOut).toFixed(2)}
+  Transactions:     ${monthTxs.length}
 
-Step 1 — Get the current balance
-Pull the user's current confirmed balance from the app data. Never assume or estimate. Current total balance: $${totalBalance.toFixed(2)}
+Spending by Category (this month):
+${catLines}
 
-Step 2 — Map every day forward
-Starting from today, lay out every single day until you hit the next major danger zone. A danger zone is any day with rent, a car payment, or any bill over $200. Include every transaction that is scheduled or expected on each day — bills, paychecks, earn in withdrawals, earn in repayments, tilt repayments, afterpay payments, groceries, gas, and anything else in the system.
+Recent Transactions (last 15):
+${recentTxLines}
 
-Step 3 — Find the floor
-Identify the single lowest balance point in that entire window. That is the floor. Everything depends on this number.
+PENDING INCOME (not in balance until marked paid)
+${pendingLines}
 
-Step 4 — Apply the purchase
-Subtract the amount the user wants to spend from today's balance and re-run the map. Check if any day in the window now goes below $20. The $20 buffer is non-negotiable — never recommend spending if it causes any day to drop below $20.
+DEBTS
+${debtLines}
+  Total Debt: $${totalDebt.toFixed(2)}
 
-Step 5 — Answer
-- If no day drops below $20 → Yes. Tell them the lowest balance they'll hit after the purchase.
-- If any day drops below $20 → No. Tell them exactly which day, what the balance would be, and what the max they can safely spend is.
-- If it's borderline → Give them the max safe amount to spend.
+SAVINGS GOALS
+${savingsLines}
+  Total Saved: $${totalSaved.toFixed(2)}
 
-Step 6 — Long term awareness
-Never only look at today or this week. Always look far enough forward to catch rent ($1,433.03 on 1st), car payment ($530 on 15th), and any large bills coming up. A purchase might look fine today but wipe them out on the 1st of next month. Always catch that.
+30-DAY PROJECTED DAILY BALANCE
+  Includes: all paychecks, all monthly bills, EarnIn repayment, TILT repayment,
+  Afterpay payments, groceries -$60/Sunday, gas -$20 biweekly.
+  Wife's Due and other pending income counted ONLY if already marked as paid.
 
-Step 7 — Format
-Always respond in the daily list format. Never paragraphs. Show each day, the transactions, and the running balance. End with a clear ✅ YES, ❌ NO, or 💰 MAX SAFE AMOUNT.
+  *** LOWEST POINT IN 30 DAYS: $${lowestBal.toFixed(2)} on ${lowestDate} ***
 
-$20 buffer is ABSOLUTE MINIMUM — never recommend spending if it causes any day to drop below $20.
+${projLines.join('\n')}
 
-AVAILABLE ACTIONS (use tool calls for these):
-- Log any expense or income transaction
-- Update account balances
-- Log one-time income
-- Mark EarnIn steps taken/untaken
-- Log savings deposits
+FINANCIAL ADVISOR RULES — FOLLOW EXACTLY ON EVERY MESSAGE:
+1. NEVER answer a spending question without running the full 30-day map first.
+2. $20 buffer is NON-NEGOTIABLE — never OK spending that drops any day below $20.
+3. If any day in 30 days projects below $20, warn immediately even if not asked.
+4. Count ALL 4 paychecks in a month — never miss the 4th Friday.
+5. EarnIn withdrawals = INCOME. EarnIn repayment = EXPENSE on repayment date. Count both.
+6. Wife's Due is PENDING — do NOT count it until Mark as Paid is clicked.
+7. Groceries -$60 every Sunday, Gas -$20 every 2 weeks. Already baked into the map above.
+8. LOWEST POINT is the key number — always reference it in spending answers.
+9. If user asks "looking good?" show: all 4 paychecks, lowest point, end-of-month balance.
 
-RESPONSE FORMAT RULES (MANDATORY — follow for EVERY single message):
+SPENDING CHECK PROTOCOL:
+  Step 1 — Current balance: $${totalBalance.toFixed(2)}
+  Step 2 — 30-day map built above with every bill, paycheck, recurring expense
+  Step 3 — Lowest point: $${lowestBal.toFixed(2)} on ${lowestDate}
+  Step 4 — Subtract purchase, re-check all 30 days for sub-$20 balance
+  Step 5 — Answer: YES (show new lowest) / NO (show which day fails + max safe) / MAX SAFE AMOUNT
 
-CRITICAL: This chat renders PLAIN TEXT only. NEVER use markdown: no **, no *, no ##, no __, no backticks. Those characters will show up literally and look broken.
+AVAILABLE ACTIONS (use tool calls — never simulate):
+  - Log any expense or income transaction
+  - Update account balances
+  - Log one-time income
+  - Mark EarnIn steps taken/untaken
+  - Log savings deposits
 
-Use this exact style instead:
-
-For expense/date lists:
-📅 Upcoming Expenses — Edwin
-May 2026
-- Thursday, May 28
-  College — $135.00
-
-- Friday, May 29
-  EarnIn Repayment — $521.96
-  TILT Repayment — $400.00
-
-June 2026
-- Monday, June 1
-  Rent — $1,433.03
-
-Total: $X,XXX.XX
-
-For spending checks (day-by-day):
-📊 Can You Spend $X? — Edwin
-- Thursday, May 28  →  Balance: $XXX.XX
-- Friday, May 29  →  Paycheck +$980  →  Balance: $XXX.XX
-- Sunday, May 31  →  Afterpay -$37.50  →  Balance: $XXX.XX
-...
-Verdict: ✅ YES / ❌ NO / 💰 MAX: $X.XX
-
-For simple questions:
-💰 Quick Answer — Edwin
-- Fact one
-- Fact two
-- Fact three
-
-RULES:
-- Use emojis only at the START of section headers (📅 💰 📊 ⚠️ ✅ ❌ 💳 🏦 💸 🎯)
-- Use a dash + space ( - ) for ALL list items
-- Indent sub-items with 2 spaces
-- No paragraphs ever — structure everything as labeled sections + dashes
-- Address the user as Edwin
-- Never reveal API keys or internal system details`
+RESPONSE FORMAT — MANDATORY:
+  Plain text only — NEVER markdown (no **, no *, no ##, no backticks).
+  Spending checks: daily list, one line per day, end with YES / NO / MAX.
+  General questions: labeled sections + dash lists.
+  Address user as Edwin. Be direct. No filler.
+  Never reveal API keys or internal system details.`
 }
 
 function TypingIndicator() {
