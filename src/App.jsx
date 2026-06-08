@@ -40,6 +40,9 @@ function AppRoutes() {
 export default function App() {
   const [splashDone, setSplashDone] = useState(false)
   const theme = useStore(s => s.theme)
+  const initialize = useStore(s => s.initialize)
+
+  useEffect(() => { initialize() }, [])
 
   // Apply theme to document element
   useEffect(() => {

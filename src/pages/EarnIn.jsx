@@ -329,12 +329,21 @@ export default function EarnIn() {
   return (
     <div className="p-6 max-w-3xl mx-auto">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-4">
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
           <TrendingUp size={24} className="text-emerald-400" />
           Earn In
         </h1>
         <p className="text-slate-400 text-sm mt-1">Weekly cash advance — new cycle every Friday</p>
+      </div>
+
+      {/* Minimal use mode banner */}
+      <div className="mb-6 flex items-start gap-3 p-4 rounded-xl border border-amber-500/20 bg-amber-500/5">
+        <AlertTriangle size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-amber-300 text-sm font-semibold">Minimal use mode — only use if needed</p>
+          <p className="text-slate-400 text-xs mt-0.5">Earn In and TILT are emergency options only. Avoid taking advances unless absolutely necessary to prevent a negative balance.</p>
+        </div>
       </div>
 
       {/* Current Cycle */}

@@ -1,718 +1,770 @@
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import { addWeeks, format, parseISO, nextFriday, isFriday } from 'date-fns'
-import { supabase } from '../lib/supabase'
+// SUPABASE IS THE SOURCE OF TRUTH
+// Never reset or re-seed this data on deploy
+// Check for existing records before inserting
+// All user data persists in Supabase independently of code changes
+//
+// This store loads live from Supabase on every app start.
+// All mutations update local state immediately (optimistic) then write to Supabase async.
+// The old localStorage persist/version/migrate system has been removed — that was the bug.
 
-// Generate paychecks: every Friday starting May 22 2026, next 52 weeks
-function generatePaychecks() {
-  const paychecks = []
-  const startDate = new Date(2026, 4, 22)
-  for (let i = 0; i < 52; i++) {
-    const date = addWeeks(startDate, i)
-    paychecks.push({
-      id: `paycheck-${i + 1}`,
-      date: format(date, 'yyyy-MM-dd'),
-      amount: 980,
-      source: 'Prosperity Fire Protection, LLC',
-      account: 'chaseDebit',
-      note: 'Weekly paycheck',
-      received: false,
-    })
-  }
-  return paychecks
-}
+import { create } from 'zustand'
+import { format, addWeeks } from 'date-fns'
+import { supabase } from '../lib/supabase'
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-// ─── Static defaults ──────────────────────────────────────────────────────────
+// ─── DB row → store object transforms ────────────────────────────────────────
 
-const defaultBills = [
-  { id: 'bill-1',  name: 'Netflix',              amount: 8.65,    dueDay: 23,  frequency: 'monthly',    isActive: true,  category: 'Entertainment' },
-  { id: 'bill-2',  name: 'Amazon Prime',          amount: 0.00,    dueDay: 7,   frequency: 'monthly',    isActive: true,  category: 'Shopping' },
-  { id: 'bill-3',  name: 'TXU Electric',          amount: 110.00,  dueDay: 26,  frequency: 'monthly',    isActive: true,  category: 'Utilities' },
-  { id: 'bill-4',  name: 'Spectrum Internet',     amount: 50.26,   dueDay: 25,  frequency: 'monthly',    isActive: true,  category: 'Utilities' },
-  { id: 'bill-5',  name: 'Spectrum Mobile',       amount: 2.22,    dueDay: 19,  frequency: 'monthly',    isActive: true,  category: 'Phone' },
-  { id: 'bill-6',  name: 'iPhone Data',           amount: 55.00,   dueDay: null, frequency: 'monthly',   isActive: true,  category: 'Phone', note: 'Flexible due date' },
-  { id: 'bill-7',  name: 'Rent',                  amount: 1433.03, dueDay: 3,   frequency: 'monthly',    isActive: true,  category: 'Housing', note: 'Due Jun 3' },
-  { id: 'bill-8',  name: 'Apt Insurance',         amount: 19.17,   dueDay: 2,   frequency: 'monthly',    isActive: true,  category: 'Insurance' },
-  { id: 'bill-9',  name: 'Amazon Kindle',         amount: 12.98,   dueDay: 21,  frequency: 'monthly',    isActive: true,  category: 'Entertainment' },
-  { id: 'bill-10', name: 'Spotify',               amount: 14.06,   dueDay: 21,  frequency: 'monthly',    isActive: true,  category: 'Entertainment' },
-  { id: 'bill-11', name: 'Capital One CR',        amount: 61.00,   dueDay: 17,  frequency: 'monthly',    isActive: true,  category: 'Debt' },
-  { id: 'bill-12', name: 'Chase CR',              amount: 40.00,   dueDay: 6,   frequency: 'monthly',    isActive: true,  category: 'Debt' },
-  { id: 'bill-13', name: 'Car Payment',           amount: 530.00,  dueDay: 15,  frequency: 'monthly',    isActive: true,  category: 'Transport' },
-  { id: 'bill-14', name: 'Marcus Medicine',       amount: 50.00,   dueDay: 23,  frequency: 'monthly',    isActive: true,  category: 'Health' },
-  { id: 'bill-15', name: 'Marcus Food',           amount: 50.87,   dueDay: 16,  frequency: 'bimonthly',  isActive: true,  category: 'Food', note: 'Every 2 months' },
-  { id: 'bill-17', name: 'College',               amount: 135.00,  dueDay: 28,  frequency: 'monthly',    isActive: true,  category: 'Education', note: 'Before EOM' },
-  { id: 'bill-18', name: 'IONOS',                 amount: 1.00,    dueDay: 21,  frequency: 'monthly',    isActive: true,  category: 'Business' },
-  { id: 'bill-19', name: 'Uber Subscription',     amount: 9.99,    dueDay: 21,  frequency: 'monthly',    isActive: true,  category: 'Transport' },
-]
+const txFromRow = (r) => ({
+  id:        r.id,
+  date:      r.date,
+  type:      r.type,
+  amount:    Number(r.amount),
+  category:  r.category  || 'Other',
+  note:      r.note      || '',
+  account:   r.account   || 'chaseDebit',
+  isOneTime: r.is_one_time || false,
+  source:    r.source    || undefined,
+  createdAt: r.created_at || r.date,
+})
 
-const defaultDebts = [
-  { id: 'debt-1', name: 'Chase Credit Card',       totalBalance: 570.58,   minimumPayment: 40,  apr: 0,     paymentHistory: [] },
-  { id: 'debt-2', name: 'Capital One Credit Card', totalBalance: 2102.40,  minimumPayment: 61,  apr: 24.49, paymentHistory: [] },
-  { id: 'debt-3', name: 'College',                 totalBalance: 2695.12,  minimumPayment: 135, apr: 0,     paymentHistory: [] },
-]
+const txToRow = (tx) => ({
+  id:          tx.id,
+  date:        tx.date,
+  type:        tx.type,
+  amount:      tx.amount,
+  category:    tx.category   || null,
+  note:        tx.note       || null,
+  account:     tx.account    || 'chaseDebit',
+  is_one_time: tx.isOneTime  || false,
+  source:      tx.source     || null,
+  created_at:  tx.createdAt  || new Date().toISOString(),
+})
 
-const defaultAfterPayItems = [
-  {
-    id: 'afterpay-1',
-    name: 'Walmart Gift Card',
-    totalAmount: 150,
-    payments: [
-      { id: 'ap-p1', number: 1, amount: 37.50, dueDate: '2026-05-03', status: 'paid',     paidDate: '2026-05-03' },
-      { id: 'ap-p2', number: 2, amount: 37.50, dueDate: '2026-05-17', status: 'paid',     paidDate: '2026-05-17' },
-      { id: 'ap-p3', number: 3, amount: 37.50, dueDate: '2026-05-31', status: 'upcoming', paidDate: null },
-      { id: 'ap-p4', number: 4, amount: 37.50, dueDate: '2026-06-14', status: 'upcoming', paidDate: null, label: 'FINAL' },
-    ],
-  },
-]
+const billFromRow = (r) => ({
+  id:            r.id,
+  name:          r.name,
+  amount:        Number(r.amount) || 0,
+  dueDay:        r.due_day,
+  frequency:     r.frequency    || 'monthly',
+  isActive:      r.is_active     ?? true,
+  category:      r.category      || 'Other',
+  note:          r.note          || undefined,
+  paidThisMonth: r.paid_this_month || false,
+})
 
-// TILT — clear, no active advance
-const defaultTiltLogs = []
+const billToRow = (b) => ({
+  id:              b.id,
+  name:            b.name,
+  amount:          b.amount,
+  due_day:         b.dueDay       ?? null,
+  frequency:       b.frequency    || 'monthly',
+  is_active:       b.isActive     ?? true,
+  category:        b.category     || null,
+  note:            b.note         || null,
+  paid_this_month: b.paidThisMonth || false,
+})
 
-// EarnIn — May 29 cycle active (all 4 taken), repayment due Jun 5
-const defaultEarnInLogs = [
-  {
-    id: 'earnin-1',
-    cycleStartDate: '2026-05-29',
-    fri_taken: true,
-    sat_taken: true,
-    sun_taken: true,
-    mon_taken: true,
-    amounts: { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 },
-    repaymentAmount: 521.96,
-    status: 'active',
-  },
-]
+const pcFromRow = (r) => ({
+  id:        r.id,
+  date:      r.date,
+  amount:    Number(r.amount),
+  source:    r.source    || 'Prosperity Fire Protection, LLC',
+  account:   r.account   || 'chaseDebit',
+  note:      r.note      || 'Weekly paycheck',
+  received:  r.received  || false,
+  isOneTime: r.is_one_time || false,
+})
 
-// All May–Jun 1 transactions from Chase debit card
-const v3Transactions = [
-  // ── May 1 ──────────────────────────────────────────────────────────────────
-  { id: 'tx-m1-1',  date: '2026-05-01', type: 'out', amount: 886.89, category: 'Housing',       note: 'Rent (Cash App transfer)',               account: 'chaseDebit', createdAt: '2026-05-01T08:00:00.000Z' },
-  { id: 'tx-m1-2',  date: '2026-05-01', type: 'out', amount: 350.00, category: 'Housing',       note: 'Rent portion (Cash App)',                account: 'chaseDebit', createdAt: '2026-05-01T08:01:00.000Z' },
-  { id: 'tx-m1-3',  date: '2026-05-01', type: 'out', amount: 202.45, category: 'Housing',       note: 'Rent portion (Cash App)',                account: 'chaseDebit', createdAt: '2026-05-01T08:02:00.000Z' },
-  { id: 'tx-m1-4',  date: '2026-05-01', type: 'out', amount: 19.17,  category: 'Insurance',     note: 'Apt Insurance',                         account: 'chaseDebit', createdAt: '2026-05-01T08:03:00.000Z' },
-  // ── May 3 ──────────────────────────────────────────────────────────────────
-  { id: 'tx-m3-1',  date: '2026-05-03', type: 'out', amount: 37.50,  category: 'Shopping',      note: 'Afterpay',                              account: 'chaseDebit', createdAt: '2026-05-03T08:00:00.000Z' },
-  { id: 'tx-m3-2',  date: '2026-05-03', type: 'out', amount: 104.44, category: 'Other',         note: 'Cash App',                              account: 'chaseDebit', createdAt: '2026-05-03T08:01:00.000Z' },
-  { id: 'tx-m3-3',  date: '2026-05-03', type: 'out', amount: 250.00, category: 'Other',         note: 'Cash App',                              account: 'chaseDebit', createdAt: '2026-05-03T08:02:00.000Z' },
-  // ── May 4 ──────────────────────────────────────────────────────────────────
-  { id: 'tx-m4-1',  date: '2026-05-04', type: 'out', amount: 6.00,   category: 'Other',         note: 'Cash App',                              account: 'chaseDebit', createdAt: '2026-05-04T08:00:00.000Z' },
-  // ── May 8 ──────────────────────────────────────────────────────────────────
-  { id: 'tx-m8-1',  date: '2026-05-08', type: 'out', amount: 40.00,  category: 'Debt',          note: 'Chase CR payment',                      account: 'chaseDebit', createdAt: '2026-05-08T08:00:00.000Z' },
-  { id: 'tx-m8-2',  date: '2026-05-08', type: 'out', amount: 1.07,   category: 'Shopping',      note: 'Amazon Prime',                          account: 'chaseDebit', createdAt: '2026-05-08T08:01:00.000Z' },
-  // ── May 9 ──────────────────────────────────────────────────────────────────
-  { id: 'tx-m9-1',  date: '2026-05-09', type: 'out', amount: 37.50,  category: 'Shopping',      note: 'Afterpay',                              account: 'chaseDebit', createdAt: '2026-05-09T08:00:00.000Z' },
-  { id: 'tx-m9-2',  date: '2026-05-09', type: 'out', amount: 133.72, category: 'Food',          note: 'Walmart groceries',                     account: 'chaseDebit', createdAt: '2026-05-09T08:01:00.000Z' },
-  { id: 'tx-m9-3',  date: '2026-05-09', type: 'out', amount: 21.62,  category: 'Shopping',      note: 'Walmart',                               account: 'chaseDebit', createdAt: '2026-05-09T08:02:00.000Z' },
-  { id: 'tx-m9-4',  date: '2026-05-09', type: 'out', amount: 8.06,   category: 'Dining',        note: 'Grubhub',                               account: 'chaseDebit', createdAt: '2026-05-09T08:03:00.000Z' },
-  // ── May 10 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m10-1', date: '2026-05-10', type: 'out', amount: 49.88,  category: 'Food',          note: 'ALDI groceries',                        account: 'chaseDebit', createdAt: '2026-05-10T08:00:00.000Z' },
-  { id: 'tx-m10-2', date: '2026-05-10', type: 'out', amount: 28.25,  category: 'Dining',        note: 'In-N-Out',                              account: 'chaseDebit', createdAt: '2026-05-10T08:01:00.000Z' },
-  // ── May 11 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m11-1', date: '2026-05-11', type: 'out', amount: 39.60,  category: 'Shopping',      note: 'Amazon purchases',                      account: 'chaseDebit', createdAt: '2026-05-11T08:00:00.000Z' },
-  { id: 'tx-m11-2', date: '2026-05-11', type: 'out', amount: 9.73,   category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-11T08:01:00.000Z' },
-  { id: 'tx-m11-3', date: '2026-05-11', type: 'out', amount: 22.73,  category: 'Shopping',      note: 'Dollar Tree',                           account: 'chaseDebit', createdAt: '2026-05-11T08:02:00.000Z' },
-  // ── May 13 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m13-1', date: '2026-05-13', type: 'out', amount: 13.72,  category: 'Dining',        note: "McDonald's",                            account: 'chaseDebit', createdAt: '2026-05-13T08:00:00.000Z' },
-  { id: 'tx-m13-2', date: '2026-05-13', type: 'out', amount: 25.01,  category: 'Other',         note: '7-Eleven',                              account: 'chaseDebit', createdAt: '2026-05-13T08:01:00.000Z' },
-  // ── May 14 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m14-1', date: '2026-05-14', type: 'out', amount: 43.10,  category: 'Pet/Marcus',    note: 'Chewy (Marcus)',                        account: 'chaseDebit', createdAt: '2026-05-14T08:00:00.000Z' },
-  // ── May 15 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m15-1', date: '2026-05-15', type: 'out', amount: 24.22,  category: 'Dining',        note: 'Sonic',                                 account: 'chaseDebit', createdAt: '2026-05-15T08:00:00.000Z' },
-  { id: 'tx-m15-2', date: '2026-05-15', type: 'out', amount: 360.50, category: 'Other',         note: 'Tilt repayment',                        account: 'chaseDebit', createdAt: '2026-05-15T08:01:00.000Z' },
-  { id: 'tx-m15-3', date: '2026-05-15', type: 'out', amount: 529.94, category: 'Transport',     note: 'Cash App (car payment)',                account: 'chaseDebit', createdAt: '2026-05-15T08:02:00.000Z' },
-  // ── May 16 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m16-1', date: '2026-05-16', type: 'out', amount: 29.22,  category: 'Shopping',      note: 'Barnes & Noble',                        account: 'chaseDebit', createdAt: '2026-05-16T08:00:00.000Z' },
-  { id: 'tx-m16-2', date: '2026-05-16', type: 'out', amount: 97.41,  category: 'Shopping',      note: 'Foot Locker (shoes)',                   account: 'chaseDebit', createdAt: '2026-05-16T08:01:00.000Z' },
-  { id: 'tx-m16-3', date: '2026-05-16', type: 'out', amount: 50.87,  category: 'Pet/Marcus',    note: 'PetSmart (Marcus food)',                account: 'chaseDebit', createdAt: '2026-05-16T08:02:00.000Z' },
-  // ── May 17 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m17-1', date: '2026-05-17', type: 'out', amount: 37.50,  category: 'Shopping',      note: 'Afterpay',                              account: 'chaseDebit', createdAt: '2026-05-17T08:00:00.000Z' },
-  // ── May 18 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m18-1', date: '2026-05-18', type: 'out', amount: 3.99,   category: 'Transport',     note: 'Gas',                                   account: 'chaseDebit', createdAt: '2026-05-18T08:00:00.000Z' },
-  { id: 'tx-m18-2', date: '2026-05-18', type: 'out', amount: 61.00,  category: 'Debt',          note: 'Capital One payment',                   account: 'chaseDebit', createdAt: '2026-05-18T08:01:00.000Z' },
-  { id: 'tx-m18-3', date: '2026-05-18', type: 'out', amount: 55.00,  category: 'Phone',         note: 'iPhone Data (Zelle to Father)',         account: 'chaseDebit', createdAt: '2026-05-18T08:02:00.000Z' },
-  // ── May 19 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m19-1', date: '2026-05-19', type: 'out', amount: 2.22,   category: 'Phone',         note: 'Spectrum Mobile',                       account: 'chaseDebit', createdAt: '2026-05-19T08:00:00.000Z' },
-  // ── May 21 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m21-1', date: '2026-05-21', type: 'out', amount: 14.06,  category: 'Entertainment', note: 'Spotify',                               account: 'chaseDebit', createdAt: '2026-05-21T08:00:00.000Z' },
-  { id: 'tx-m21-2', date: '2026-05-21', type: 'out', amount: 12.98,  category: 'Entertainment', note: 'Kindle',                                account: 'chaseDebit', createdAt: '2026-05-21T08:01:00.000Z' },
-  { id: 'tx-m21-3', date: '2026-05-21', type: 'out', amount: 9.99,   category: 'Transport',     note: 'Uber Subscription',                     account: 'chaseDebit', createdAt: '2026-05-21T08:02:00.000Z' },
-  // ── May 22 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m22-1', date: '2026-05-22', type: 'out', amount: 37.50,  category: 'Shopping',      note: 'Afterpay',                              account: 'chaseDebit', createdAt: '2026-05-22T08:00:00.000Z' },
-  { id: 'tx-m22-2', date: '2026-05-22', type: 'out', amount: 1.00,   category: 'Business',      note: 'IONOS',                                 account: 'chaseDebit', createdAt: '2026-05-22T08:01:00.000Z' },
-  { id: 'tx-m22-3', date: '2026-05-22', type: 'in',  amount: 150.00, category: 'Income',        note: 'Earn In 1',                             account: 'chaseDebit', createdAt: '2026-05-22T08:02:00.000Z' },
-  // ── May 23 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m23-1', date: '2026-05-23', type: 'out', amount: 9.73,   category: 'Entertainment', note: 'Netflix',                               account: 'chaseDebit', createdAt: '2026-05-23T08:00:00.000Z' },
-  { id: 'tx-m23-2', date: '2026-05-23', type: 'out', amount: 23.00,  category: 'Dining',        note: 'Sonic',                                 account: 'chaseDebit', createdAt: '2026-05-23T08:01:00.000Z' },
-  { id: 'tx-m23-3', date: '2026-05-23', type: 'out', amount: 4.54,   category: 'Dining',        note: 'Sonic',                                 account: 'chaseDebit', createdAt: '2026-05-23T08:02:00.000Z' },
-  { id: 'tx-m23-4', date: '2026-05-23', type: 'out', amount: 25.01,  category: 'Transport',     note: '7-Eleven (gas)',                        account: 'chaseDebit', createdAt: '2026-05-23T08:03:00.000Z' },
-  { id: 'tx-m23-5', date: '2026-05-23', type: 'out', amount: 25.98,  category: 'Dining',        note: "Domino's",                              account: 'chaseDebit', createdAt: '2026-05-23T08:04:00.000Z' },
-  { id: 'tx-m23-6', date: '2026-05-23', type: 'out', amount: 53.48,  category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-23T08:05:00.000Z' },
-  // ── May 24 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m24-1', date: '2026-05-24', type: 'in',  amount: 150.00, category: 'Income',        note: 'Earn In 3',                             account: 'chaseDebit', createdAt: '2026-05-24T08:00:00.000Z' },
-  { id: 'tx-m24-2', date: '2026-05-24', type: 'out', amount: 2.96,   category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-24T08:01:00.000Z' },
-  { id: 'tx-m24-3', date: '2026-05-24', type: 'out', amount: 4.99,   category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-24T08:02:00.000Z' },
-  { id: 'tx-m24-4', date: '2026-05-24', type: 'out', amount: 5.94,   category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-24T08:03:00.000Z' },
-  { id: 'tx-m24-5', date: '2026-05-24', type: 'out', amount: 11.03,  category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-24T08:04:00.000Z' },
-  { id: 'tx-m24-6', date: '2026-05-24', type: 'out', amount: 28.56,  category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-24T08:05:00.000Z' },
-  // ── May 25 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m25-1', date: '2026-05-25', type: 'out', amount: 30.88,  category: 'Food',          note: 'ALDI groceries',                        account: 'chaseDebit', createdAt: '2026-05-25T08:00:00.000Z' },
-  { id: 'tx-m25-2', date: '2026-05-25', type: 'out', amount: 8.93,   category: 'Shopping',      note: 'Dollar Tree',                           account: 'chaseDebit', createdAt: '2026-05-25T08:01:00.000Z' },
-  { id: 'tx-m25-3', date: '2026-05-25', type: 'out', amount: 16.18,  category: 'Entertainment', note: 'Audible',                               account: 'chaseDebit', createdAt: '2026-05-25T08:02:00.000Z' },
-  { id: 'tx-m25-4', date: '2026-05-25', type: 'in',  amount: 50.00,  category: 'Income',        note: 'Earn In 4',                             account: 'chaseDebit', createdAt: '2026-05-25T08:03:00.000Z' },
-  // ── May 26 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m26-1', date: '2026-05-26', type: 'out', amount: 50.26,  category: 'Utilities',     note: 'Spectrum Internet',                     account: 'chaseDebit', createdAt: '2026-05-26T08:00:00.000Z' },
-  { id: 'tx-m26-2', date: '2026-05-26', type: 'out', amount: 7.77,   category: 'Transport',     note: 'Gas',                                   account: 'chaseDebit', createdAt: '2026-05-26T08:01:00.000Z' },
-  { id: 'tx-m26-3', date: '2026-05-26', type: 'out', amount: 9.18,   category: 'Dining',        note: "McDonald's",                            account: 'chaseDebit', createdAt: '2026-05-26T08:02:00.000Z' },
-  // ── May 27 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m27-1', date: '2026-05-27', type: 'out', amount: 8.31,   category: 'Transport',     note: 'Gas',                                   account: 'chaseDebit', createdAt: '2026-05-27T08:00:00.000Z' },
-  { id: 'tx-m27-2', date: '2026-05-27', type: 'out', amount: 30.00,  category: 'Phone',         note: 'Zelle to Father (iPhone Data)',         account: 'chaseDebit', createdAt: '2026-05-27T08:01:00.000Z' },
-  // ── May 28 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m28-1', date: '2026-05-28', type: 'out', amount: 110.00, category: 'Utilities',     note: 'TXU Electric',                          account: 'chaseDebit', createdAt: '2026-05-28T08:00:00.000Z' },
-  { id: 'tx-m28-2', date: '2026-05-28', type: 'out', amount: 140.71, category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-28T08:01:00.000Z' },
-  { id: 'tx-m28-3', date: '2026-05-28', type: 'out', amount: 12.98,  category: 'Entertainment', note: 'Kindle',                                account: 'chaseDebit', createdAt: '2026-05-28T08:02:00.000Z' },
-  { id: 'tx-m28-4', date: '2026-05-28', type: 'out', amount: 16.29,  category: 'Other',         note: 'Zelle to Father',                       account: 'chaseDebit', createdAt: '2026-05-28T08:03:00.000Z' },
-  { id: 'tx-m28-5', date: '2026-05-28', type: 'out', amount: 24.33,  category: 'Dining',        note: 'Sonic',                                 account: 'chaseDebit', createdAt: '2026-05-28T08:04:00.000Z' },
-  // ── May 29 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-m29-1', date: '2026-05-29', type: 'in',  amount: 849.18, category: 'Income',        note: 'Paycheck (Prosperity Fire)',             account: 'chaseDebit', createdAt: '2026-05-29T08:00:00.000Z' },
-  { id: 'tx-m29-2', date: '2026-05-29', type: 'out', amount: 7.19,   category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-29T08:01:00.000Z' },
-  { id: 'tx-m29-3', date: '2026-05-29', type: 'out', amount: 18.79,  category: 'Shopping',      note: 'Amazon',                                account: 'chaseDebit', createdAt: '2026-05-29T08:02:00.000Z' },
-  { id: 'tx-m29-4', date: '2026-05-29', type: 'in',  amount: 150.00, category: 'Income',        note: 'Earn In 1',                             account: 'chaseDebit', createdAt: '2026-05-29T08:03:00.000Z' },
-  { id: 'tx-m29-5', date: '2026-05-29', type: 'out', amount: 155.99, category: 'Other',         note: 'Earn In repayment',                     account: 'chaseDebit', createdAt: '2026-05-29T08:04:00.000Z' },
-  { id: 'tx-m29-6', date: '2026-05-29', type: 'out', amount: 155.99, category: 'Other',         note: 'Earn In repayment',                     account: 'chaseDebit', createdAt: '2026-05-29T08:05:00.000Z' },
-  { id: 'tx-m29-7', date: '2026-05-29', type: 'out', amount: 155.99, category: 'Other',         note: 'Earn In repayment',                     account: 'chaseDebit', createdAt: '2026-05-29T08:06:00.000Z' },
-  { id: 'tx-m29-8', date: '2026-05-29', type: 'out', amount: 53.99,  category: 'Other',         note: 'Earn In repayment',                     account: 'chaseDebit', createdAt: '2026-05-29T08:07:00.000Z' },
-  // ── May 31 — Grapevine Mills mall trip ─────────────────────────────────────
-  { id: 'tx-m31-1',  date: '2026-05-31', type: 'out', amount: 13.48,  category: 'Dining',       note: 'Feng Cha (Grapevine Mills)',             account: 'chaseDebit', createdAt: '2026-05-31T08:00:00.000Z' },
-  { id: 'tx-m31-2',  date: '2026-05-31', type: 'out', amount: 54.12,  category: 'Shopping',     note: 'Custom Engraving (Grapevine Mills)',     account: 'chaseDebit', createdAt: '2026-05-31T08:01:00.000Z' },
-  { id: 'tx-m31-3',  date: '2026-05-31', type: 'out', amount: 47.63,  category: 'Shopping',     note: 'Primark (Grapevine Mills)',              account: 'chaseDebit', createdAt: '2026-05-31T08:02:00.000Z' },
-  { id: 'tx-m31-4',  date: '2026-05-31', type: 'out', amount: 54.10,  category: 'Shopping',     note: 'Old Navy (Grapevine Mills)',             account: 'chaseDebit', createdAt: '2026-05-31T08:03:00.000Z' },
-  { id: 'tx-m31-5',  date: '2026-05-31', type: 'out', amount: 57.35,  category: 'Shopping',     note: 'Kawaii Kollections (Grapevine Mills)',   account: 'chaseDebit', createdAt: '2026-05-31T08:04:00.000Z' },
-  { id: 'tx-m31-6',  date: '2026-05-31', type: 'out', amount: 30.31,  category: 'Shopping',     note: 'Five Below (Grapevine Mills)',           account: 'chaseDebit', createdAt: '2026-05-31T08:05:00.000Z' },
-  { id: 'tx-m31-7',  date: '2026-05-31', type: 'out', amount: 12.57,  category: 'Shopping',     note: 'Hot Topic (Grapevine Mills)',            account: 'chaseDebit', createdAt: '2026-05-31T08:06:00.000Z' },
-  { id: 'tx-m31-8',  date: '2026-05-31', type: 'out', amount: 36.95,  category: 'Dining',       note: 'Basil Thai (Grapevine Mills)',           account: 'chaseDebit', createdAt: '2026-05-31T08:07:00.000Z' },
-  { id: 'tx-m31-9',  date: '2026-05-31', type: 'out', amount: 35.70,  category: 'Pet/Marcus',   note: 'PetSmart (Grapevine Mills)',             account: 'chaseDebit', createdAt: '2026-05-31T08:08:00.000Z' },
-  { id: 'tx-m31-10', date: '2026-05-31', type: 'out', amount: 18.40,  category: 'Pet/Marcus',   note: 'PetSmart (Grapevine Mills)',             account: 'chaseDebit', createdAt: '2026-05-31T08:09:00.000Z' },
-  { id: 'tx-m31-11', date: '2026-05-31', type: 'out', amount: 25.95,  category: 'Dining',       note: "Domino's (Grapevine Mills)",             account: 'chaseDebit', createdAt: '2026-05-31T08:10:00.000Z' },
-  { id: 'tx-m31-12', date: '2026-05-31', type: 'out', amount: 12.10,  category: 'Food',         note: 'Lone Star Markets (Grapevine Mills)',    account: 'chaseDebit', createdAt: '2026-05-31T08:11:00.000Z' },
-  // ── June 1 ─────────────────────────────────────────────────────────────────
-  { id: 'tx-j1-1',  date: '2026-06-01', type: 'in',  amount: 237.29, category: 'Income',        note: 'Paycheck savings portion transferred back', account: 'chaseDebit', createdAt: '2026-06-01T08:00:00.000Z' },
-  { id: 'tx-j1-2',  date: '2026-06-01', type: 'out', amount: 37.50,  category: 'Shopping',      note: 'Afterpay payment (Walmart Gift Card 3/4)',   account: 'chaseDebit', createdAt: '2026-06-01T08:01:00.000Z' },
-]
+const pcToRow = (p) => ({
+  id:          p.id,
+  date:        p.date,
+  amount:      p.amount,
+  source:      p.source     || null,
+  account:     p.account    || 'chaseDebit',
+  note:        p.note       || null,
+  received:    p.received   || false,
+  is_one_time: p.isOneTime  || false,
+})
 
-// May paychecks to add (May 1, 8, 15 are before generated range; May 22 & 29 update generated entries)
-const v3NewPaychecks = [
-  { id: 'paycheck-may1',  date: '2026-05-01', amount: 994.23,  source: 'Prosperity Fire Protection, LLC', account: 'chaseDebit', note: 'Weekly paycheck', received: true },
-  { id: 'paycheck-may8',  date: '2026-05-08', amount: 983.95,  source: 'Prosperity Fire Protection, LLC', account: 'chaseDebit', note: 'Weekly paycheck', received: true },
-  { id: 'paycheck-may15', date: '2026-05-15', amount: 984.81,  source: 'Prosperity Fire Protection, LLC', account: 'chaseDebit', note: 'Weekly paycheck', received: true },
-]
+const tiltFromRow = (r) => ({
+  id:               r.id,
+  amountUsed:       Number(r.amount_used)   || 0,
+  creditLimit:      Number(r.credit_limit)  || 400,
+  instantDelivery:  r.instant_delivery      ?? true,
+  instantFee:       Number(r.instant_fee)   || 12,
+  repaymentDate:    r.repayment_date,
+  repaymentOption:  r.repayment_option      || 'A',
+  status:           r.status               || 'active',
+  repaidAt:         r.repaid_at            || undefined,
+  note:             r.note                 || undefined,
+  createdAt:        r.created_at,
+})
+
+const tiltToRow = (l) => ({
+  id:               l.id,
+  amount_used:      l.amountUsed,
+  credit_limit:     l.creditLimit     || 400,
+  instant_delivery: l.instantDelivery ?? true,
+  instant_fee:      l.instantFee      || 12,
+  repayment_date:   l.repaymentDate   || null,
+  repayment_option: l.repaymentOption || 'A',
+  status:           l.status         || 'active',
+  repaid_at:        l.repaidAt       || null,
+  note:             l.note           || null,
+  created_at:       l.createdAt      || new Date().toISOString(),
+})
+
+const earnInFromRow = (r) => ({
+  id:              r.id,
+  cycleStartDate:  r.cycle_start_date,
+  fri_taken:       r.fri_taken   || false,
+  sat_taken:       r.sat_taken   || false,
+  sun_taken:       r.sun_taken   || false,
+  mon_taken:       r.mon_taken   || false,
+  amounts:         r.amounts     || { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 },
+  repaymentAmount: Number(r.repayment_amount) || 521.96,
+  status:          r.status     || 'active',
+})
+
+const earnInToRow = (l) => ({
+  id:               l.id,
+  cycle_start_date: l.cycleStartDate,
+  fri_taken:        l.fri_taken   || false,
+  sat_taken:        l.sat_taken   || false,
+  sun_taken:        l.sun_taken   || false,
+  mon_taken:        l.mon_taken   || false,
+  amounts:          l.amounts     || { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 },
+  repayment_amount: l.repaymentAmount || 521.96,
+  status:           l.status     || 'active',
+})
+
+const afterpayFromRow = (r) => ({
+  id:          r.id,
+  name:        r.name,
+  totalAmount: Number(r.total_amount) || 0,
+  payments:    r.payments || [],
+})
+
+const afterpayToRow = (i) => ({
+  id:           i.id,
+  name:         i.name,
+  total_amount: i.totalAmount || 0,
+  payments:     i.payments    || [],
+})
+
+const debtFromRow = (r) => ({
+  id:             r.id,
+  name:           r.name,
+  totalBalance:   Number(r.total_balance)   || 0,
+  minimumPayment: Number(r.minimum_payment) || 0,
+  apr:            Number(r.apr)             || 0,
+  paymentHistory: r.payment_history         || [],
+})
+
+const debtToRow = (d) => ({
+  id:              d.id,
+  name:            d.name,
+  total_balance:   d.totalBalance,
+  minimum_payment: d.minimumPayment,
+  apr:             d.apr,
+  payment_history: d.paymentHistory || [],
+})
+
+const savingsFromRow = (r) => ({
+  id:            r.id,
+  name:          r.name,
+  targetAmount:  Number(r.target_amount)  || 0,
+  currentAmount: Number(r.current_amount) || 0,
+  targetDate:    r.target_date  || undefined,
+  createdAt:     r.created_at,
+})
+
+const savingsToRow = (g) => ({
+  id:             g.id,
+  name:           g.name,
+  target_amount:  g.targetAmount  || 0,
+  current_amount: g.currentAmount || 0,
+  target_date:    g.targetDate    || null,
+})
+
+const pendingFromRow = (r) => ({
+  id:        r.id,
+  label:     r.label,
+  amount:    Number(r.amount),
+  details:   r.details   || [],
+  note:      r.note      || '',
+  status:    r.status    || 'pending',
+  createdAt: r.created_at,
+})
+
+const pendingToRow = (p) => ({
+  id:         p.id,
+  label:      p.label,
+  amount:     p.amount,
+  details:    p.details   || [],
+  note:       p.note      || null,
+  status:     p.status    || 'pending',
+  created_at: p.createdAt || format(new Date(), 'yyyy-MM-dd'),
+})
+
+// ─── Supabase write helpers ───────────────────────────────────────────────────
+// All writes are fire-and-forget. Local state is updated immediately (optimistic).
+function sbWrite(promise, label) {
+  promise.then(({ error }) => {
+    if (error) console.error(`[Supabase] ${label}:`, error.message)
+  }).catch(err => console.error(`[Supabase] ${label}:`, err))
+}
+
+function sbUpdateBalance(account, balance) {
+  sbWrite(
+    supabase.from('accounts').upsert({ key: account, balance, updated_at: new Date().toISOString() }, { onConflict: 'key' }),
+    `updateBalance(${account})`
+  )
+}
 
 // ─── Store ────────────────────────────────────────────────────────────────────
+export const useStore = create((set, get) => ({
 
-export const useStore = create(
-  persist(
-    (set, get) => ({
-      // ─── THEME ────────────────────────────────────────────────
-      theme: 'dark',
-      toggleTheme: () => {
-        const next = get().theme === 'dark' ? 'light' : 'dark'
-        set({ theme: next })
-        localStorage.setItem('theme', next)
-      },
+  // ── Loading state ──────────────────────────────────────────────────────────
+  initialized: false,
+  syncing:     false,
 
-      // ─── LOADING / SYNC ───────────────────────────────────────
-      isLoading: false,
-      syncing: false,
-      setLoading: (val) => set({ isLoading: val }),
-      setSyncing: (val) => set({ syncing: val }),
+  // ── Theme (localStorage only — display preference, not financial data) ─────
+  theme: localStorage.getItem('theme') || 'dark',
+  toggleTheme: () => {
+    const next = get().theme === 'dark' ? 'light' : 'dark'
+    set({ theme: next })
+    localStorage.setItem('theme', next)
+    document.documentElement.classList.toggle('dark',  next === 'dark')
+    document.documentElement.classList.toggle('light', next === 'light')
+  },
 
-      // ─── TOASTS ───────────────────────────────────────────────
-      toasts: [],
-      addToast: (message, type = 'success') => {
-        const id = generateId()
-        set((state) => ({ toasts: [...state.toasts, { id, message, type }] }))
-        setTimeout(() => get().removeToast(id), 3500)
-      },
-      removeToast: (id) => set((state) => ({ toasts: state.toasts.filter(t => t.id !== id) })),
+  // ── Toasts ─────────────────────────────────────────────────────────────────
+  toasts: [],
+  addToast: (message, type = 'success') => {
+    const id = generateId()
+    set(s => ({ toasts: [...s.toasts, { id, message, type }] }))
+    setTimeout(() => get().removeToast(id), 3500)
+  },
+  removeToast: (id) => set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })),
 
-      // ─── ACCOUNTS ─────────────────────────────────────────────
-      accounts: {
-        chaseDebit: 1971.32,
-        capitalOneDebit: 0,
-        cashApp: 0,
-        paypal: 0,
-      },
-      setAccount: (account, value) => {
-        set((state) => ({
-          accounts: { ...state.accounts, [account]: Number(value) }
-        }))
-      },
-      get totalBalance() {
-        const a = get().accounts
-        return a.chaseDebit + a.capitalOneDebit + a.cashApp + a.paypal
-      },
+  // ── Data (empty until initialized from Supabase) ───────────────────────────
+  accounts:      { chaseDebit: 0, capitalOneDebit: 0, cashApp: 0, paypal: 0 },
+  projectedBalance: null,
+  transactions:  [],
+  bills:         [],
+  paychecks:     [],
+  tiltLogs:      [],
+  earnInLogs:    [],
+  afterpayItems: [],
+  debts:         [],
+  savingsGoals:  [],
+  settings: {
+    earnIn:   { repaymentAmount: 521.96, fri: 155.99, sat: 155.99, sun: 105.99, mon: 53.99 },
+    tilt:     { maxCredit: 400, instantFee: 12 },
+    paycheck: { defaultAmount: 980, frequency: 'weekly' },
+    billsResetMonth: null,
+  },
+  pendingIncome: [],
 
-      // ─── PROJECTED BALANCE OVERRIDE ───────────────────────────
-      projectedBalance: 2469.45,
-      setProjectedBalance: (val) => set({ projectedBalance: val }),
+  // ── INITIALIZE FROM SUPABASE ───────────────────────────────────────────────
+  // Called once in App.jsx on mount. Loads all tables and populates the store.
+  // If Supabase tables are empty, seeds all initial data automatically.
+  initialize: async () => {
+    try {
+      // Check accounts first — if empty, seed everything
+      const { data: accRows, error: accErr } = await supabase.from('accounts').select('*')
+      if (accErr) {
+        console.error('[Supabase] accounts load failed:', accErr.message)
+        console.warn('[Supabase] Run supabase/migrations/002_reset_and_correct_schema.sql in the Supabase SQL Editor.')
+        set({ initialized: true })
+        return
+      }
 
-      // ─── PENDING INCOME ───────────────────────────────────────
-      pendingIncome: [
-        {
-          id: 'pending-1',
-          label: "Wife's Due",
-          amount: 224.57,
-          details: [
-            { desc: 'Zelle from Father', amount: 150.00 },
-            { desc: 'Zelle from Father', amount: 37.00 },
-            { desc: 'Hot Topic', amount: 12.57 },
-            { desc: 'Additional', amount: 25.00 },
-          ],
-          note: 'More owed, amount pending confirmation',
-          status: 'pending',
-          createdAt: '2026-06-02',
-        },
-      ],
-      markPendingPaid: (id) => {
-        set((state) => {
-          const item = state.pendingIncome.find(p => p.id === id)
-          if (!item || item.status === 'paid') return state
-          const newTx = {
-            id: generateId(),
-            date: format(new Date(), 'yyyy-MM-dd'),
-            type: 'in',
-            amount: item.amount,
-            category: 'Income',
-            note: item.label,
-            account: 'chaseDebit',
-            createdAt: new Date().toISOString(),
-          }
-          return {
-            pendingIncome: state.pendingIncome.map(p => p.id === id ? { ...p, status: 'paid' } : p),
-            transactions: [newTx, ...state.transactions],
-            accounts: { ...state.accounts, chaseDebit: state.accounts.chaseDebit + item.amount },
-          }
-        })
-        get().addToast("Wife's Due received — balance updated", 'success')
-      },
-      addPendingIncome: (item) => {
-        set((state) => ({ pendingIncome: [...state.pendingIncome, { ...item, id: generateId() }] }))
-      },
-      removePendingIncome: (id) => {
-        set((state) => ({ pendingIncome: state.pendingIncome.filter(p => p.id !== id) }))
-      },
+      if (!accRows || accRows.length === 0) {
+        console.log('[Supabase] Empty database — auto-seeding...')
+        await get()._seedAll()
+        return get().initialize() // reload after seed
+      }
 
-      // ─── TRANSACTIONS ─────────────────────────────────────────
-      transactions: v3Transactions,
-      addTransaction: (transaction) => {
-        const newTx = { ...transaction, id: generateId(), createdAt: new Date().toISOString() }
-        set((state) => {
-          const current = state.accounts[transaction.account] ?? 0
-          const delta = transaction.type === 'in' ? transaction.amount : -transaction.amount
-          return {
-            transactions: [newTx, ...state.transactions],
-            accounts: { ...state.accounts, [transaction.account]: current + delta },
-          }
-        })
-        get().addToast('Transaction added', 'success')
-        return newTx
-      },
-      updateTransaction: (id, updates) => {
-        set((state) => {
-          const old = state.transactions.find(t => t.id === id)
-          const accounts = { ...state.accounts }
-          if (old) {
-            const oldDelta = old.type === 'in' ? -old.amount : old.amount
-            accounts[old.account] = (accounts[old.account] ?? 0) + oldDelta
-          }
-          const newAmount = parseFloat(updates.amount ?? old?.amount)
-          const newType = updates.type ?? old?.type
-          const newAccount = updates.account ?? old?.account
-          const newDelta = newType === 'in' ? newAmount : -newAmount
-          accounts[newAccount] = (accounts[newAccount] ?? 0) + newDelta
-          return {
-            transactions: state.transactions.map(t => t.id === id ? { ...t, ...updates } : t),
-            accounts,
-          }
-        })
-        get().addToast('Transaction updated', 'success')
-      },
-      deleteTransaction: (id) => {
-        set((state) => {
-          const tx = state.transactions.find(t => t.id === id)
-          const accounts = { ...state.accounts }
-          if (tx) {
-            const delta = tx.type === 'in' ? -tx.amount : tx.amount
-            accounts[tx.account] = (accounts[tx.account] ?? 0) + delta
-          }
-          return {
-            transactions: state.transactions.filter(t => t.id !== id),
-            accounts,
-          }
-        })
-        get().addToast('Transaction deleted', 'success')
-      },
+      // Load all tables in parallel
+      const [
+        { data: txRows },
+        { data: billRows },
+        { data: pcRows },
+        { data: tiltRows },
+        { data: earnInRows },
+        { data: apRows },
+        { data: debtRows },
+        { data: sgRows },
+        { data: settingsRows },
+        { data: piRows },
+      ] = await Promise.all([
+        supabase.from('transactions').select('*').order('created_at', { ascending: false }),
+        supabase.from('bills').select('*'),
+        supabase.from('paychecks').select('*').order('date'),
+        supabase.from('tilt_logs').select('*').order('created_at', { ascending: false }),
+        supabase.from('earnin_logs').select('*').order('created_at', { ascending: false }),
+        supabase.from('afterpay_items').select('*'),
+        supabase.from('debts').select('*'),
+        supabase.from('savings_goals').select('*'),
+        supabase.from('settings').select('*').eq('id', 'singleton'),
+        supabase.from('pending_income').select('*'),
+      ])
 
-      // ─── BILLS ────────────────────────────────────────────────
-      bills: defaultBills,
-      addBill: (bill) => {
-        const newBill = { ...bill, id: generateId() }
-        set((state) => ({ bills: [...state.bills, newBill] }))
-        get().addToast('Bill added', 'success')
-      },
-      updateBill: (id, updates) => {
-        set((state) => ({
-          bills: state.bills.map(b => b.id === id ? { ...b, ...updates } : b)
-        }))
-        get().addToast('Bill updated', 'success')
-      },
-      deleteBill: (id) => {
-        set((state) => ({ bills: state.bills.filter(b => b.id !== id) }))
-        get().addToast('Bill deleted', 'success')
-      },
+      const accountsObj = {}
+      accRows.forEach(r => { accountsObj[r.key] = Number(r.balance) })
 
-      // ─── PAYCHECKS ────────────────────────────────────────────
-      paychecks: [
-        ...v3NewPaychecks,
-        ...generatePaychecks().map(p => {
-          if (p.id === 'paycheck-1') return { ...p, amount: 993.21,  received: true }
-          if (p.id === 'paycheck-2') return { ...p, amount: 1061.47, received: true }
-          return p
-        }),
-      ],
-      addPaycheck: (paycheck) => {
-        const newP = { ...paycheck, id: generateId() }
-        set((state) => ({ paychecks: [newP, ...state.paychecks] }))
-        get().addToast('Paycheck added', 'success')
-      },
-      updatePaycheck: (id, updates) => {
-        set((state) => ({
-          paychecks: state.paychecks.map(p => p.id === id ? { ...p, ...updates } : p)
-        }))
-      },
-      deletePaycheck: (id) => {
-        set((state) => ({ paychecks: state.paychecks.filter(p => p.id !== id) }))
-      },
-      markPaycheckReceived: (id) => {
-        set((state) => ({
-          paychecks: state.paychecks.map(p => p.id === id ? { ...p, received: true } : p)
-        }))
-        get().addToast('Paycheck marked as received', 'success')
-      },
+      const settingsRow = settingsRows?.[0]
+      const settings = settingsRow ? {
+        earnIn:   settingsRow.earn_in      || { repaymentAmount: 521.96, fri: 155.99, sat: 155.99, sun: 105.99, mon: 53.99 },
+        tilt:     settingsRow.tilt_cfg     || { maxCredit: 400, instantFee: 12 },
+        paycheck: settingsRow.paycheck_cfg || { defaultAmount: 980, frequency: 'weekly' },
+        billsResetMonth: settingsRow.paycheck_cfg?._billsResetMonth || null,
+      } : get().settings
 
-      // ─── TILT LOGS ────────────────────────────────────────────
-      tiltLogs: defaultTiltLogs,
-      addTiltLog: (log) => {
-        const newLog = { ...log, id: generateId(), createdAt: new Date().toISOString() }
-        set((state) => ({ tiltLogs: [newLog, ...state.tiltLogs] }))
-        get().addToast('TILT advance logged', 'success')
-      },
-      updateTiltLog: (id, updates) => {
-        set((state) => ({
-          tiltLogs: state.tiltLogs.map(l => l.id === id ? { ...l, ...updates } : l)
-        }))
-      },
-      deleteTiltLog: (id) => {
-        set((state) => ({ tiltLogs: state.tiltLogs.filter(l => l.id !== id) }))
-      },
-      markTiltRepaid: (id) => {
-        set((state) => ({
-          tiltLogs: state.tiltLogs.map(l => l.id === id ? { ...l, status: 'repaid', repaidAt: new Date().toISOString() } : l)
-        }))
-        get().addToast('TILT advance marked as repaid', 'success')
-      },
-
-      // ─── EARN IN LOGS ─────────────────────────────────────────
-      earnInLogs: defaultEarnInLogs,
-      addEarnInLog: (log) => {
-        const newLog = { ...log, id: generateId(), createdAt: new Date().toISOString() }
-        set((state) => ({ earnInLogs: [newLog, ...state.earnInLogs] }))
-        get().addToast('Earn In cycle added', 'success')
-      },
-      updateEarnInLog: (id, updates) => {
-        set((state) => ({
-          earnInLogs: state.earnInLogs.map(l => l.id === id ? { ...l, ...updates } : l)
-        }))
-      },
-      deleteEarnInLog: (id) => {
-        set((state) => ({ earnInLogs: state.earnInLogs.filter(l => l.id !== id) }))
-      },
-      markStepTaken: (logId, step) => {
-        set((state) => ({
-          earnInLogs: state.earnInLogs.map(l =>
-            l.id === logId ? { ...l, [`${step}_taken`]: true } : l
-          )
-        }))
-        get().addToast(`Earn In ${step.charAt(0).toUpperCase() + step.slice(1)} step marked`, 'success')
-      },
-
-      // ─── AFTERPAY ─────────────────────────────────────────────
-      afterpayItems: defaultAfterPayItems,
-      addAfterpayItem: (item) => {
-        const newItem = { ...item, id: generateId() }
-        set((state) => ({ afterpayItems: [...state.afterpayItems, newItem] }))
-        get().addToast('Afterpay item added', 'success')
-      },
-      updateAfterpayItem: (id, updates) => {
-        set((state) => ({
-          afterpayItems: state.afterpayItems.map(i => i.id === id ? { ...i, ...updates } : i)
-        }))
-      },
-      deleteAfterpayItem: (id) => {
-        set((state) => ({ afterpayItems: state.afterpayItems.filter(i => i.id !== id) }))
-      },
-      markAfterpayPayment: (itemId, paymentId) => {
-        set((state) => ({
-          afterpayItems: state.afterpayItems.map(item => {
-            if (item.id !== itemId) return item
-            return {
-              ...item,
-              payments: item.payments.map(p =>
-                p.id === paymentId
-                  ? { ...p, status: 'paid', paidDate: format(new Date(), 'yyyy-MM-dd') }
-                  : p
-              )
-            }
-          })
-        }))
-        get().addToast('Afterpay payment marked as paid', 'success')
-      },
-      unmarkAfterpayPayment: (itemId, paymentId) => {
-        set((state) => ({
-          afterpayItems: state.afterpayItems.map(item => {
-            if (item.id !== itemId) return item
-            const payments = item.payments
-            const idx = payments.findIndex(p => p.id === paymentId)
-            return {
-              ...item,
-              payments: payments.map((p, i) =>
-                p.id === paymentId
-                  ? { ...p, status: idx === payments.length - 1 ? 'final' : 'upcoming', paidDate: null }
-                  : p
-              )
-            }
-          })
-        }))
-        get().addToast('Afterpay payment unmarked', 'success')
-      },
-
-      // ─── DEBTS ────────────────────────────────────────────────
-      debts: defaultDebts,
-      updateDebt: (id, updates) => {
-        set((state) => ({
-          debts: state.debts.map(d => d.id === id ? { ...d, ...updates } : d)
-        }))
-        get().addToast('Debt updated', 'success')
-      },
-      addDebt: (debt) => {
-        const newDebt = { ...debt, id: generateId(), paymentHistory: [] }
-        set((state) => ({ debts: [...state.debts, newDebt] }))
-        get().addToast('Debt added', 'success')
-      },
-      deleteDebt: (id) => {
-        set((state) => ({ debts: state.debts.filter(d => d.id !== id) }))
-      },
-      logDebtPayment: (debtId, payment) => {
-        const newPayment = { ...payment, id: generateId(), date: format(new Date(), 'yyyy-MM-dd') }
-        set((state) => ({
-          debts: state.debts.map(d => {
-            if (d.id !== debtId) return d
-            const newBalance = Math.max(0, d.totalBalance - payment.amount)
-            return {
-              ...d,
-              totalBalance: newBalance,
-              paymentHistory: [newPayment, ...d.paymentHistory]
-            }
-          })
-        }))
-        get().addToast('Payment logged', 'success')
-      },
-
-      // ─── SAVINGS GOALS ────────────────────────────────────────
-      savingsGoals: [],
-      addSavingsGoal: (goal) => {
-        const newGoal = { ...goal, id: generateId(), currentAmount: 0, createdAt: new Date().toISOString() }
-        set((state) => ({ savingsGoals: [...state.savingsGoals, newGoal] }))
-        get().addToast('Savings goal created', 'success')
-      },
-      updateSavingsGoal: (id, updates) => {
-        set((state) => ({
-          savingsGoals: state.savingsGoals.map(g => g.id === id ? { ...g, ...updates } : g)
-        }))
-        get().addToast('Goal updated', 'success')
-      },
-      deleteSavingsGoal: (id) => {
-        set((state) => ({ savingsGoals: state.savingsGoals.filter(g => g.id !== id) }))
-      },
-      contributeToGoal: (id, amount) => {
-        set((state) => ({
-          savingsGoals: state.savingsGoals.map(g =>
-            g.id === id ? { ...g, currentAmount: g.currentAmount + Number(amount) } : g
-          )
-        }))
-        get().addToast('Contribution added', 'success')
-      },
-
-      // ─── SETTINGS ─────────────────────────────────────────────
-      settings: {
-        earnIn: {
-          repaymentAmount: 521.96,
-          fri: 155.99,
-          sat: 155.99,
-          sun: 155.99,
-          mon: 53.99,
-        },
-        tilt: {
-          maxCredit: 400,
-          instantFee: 12,
-        },
-        paycheck: {
-          defaultAmount: 980,
-          frequency: 'weekly',
-        },
-      },
-      updateSettings: (section, updates) => {
-        set((state) => ({
-          settings: {
-            ...state.settings,
-            [section]: { ...state.settings[section], ...updates }
-          }
-        }))
-        get().addToast('Settings saved', 'success')
-      },
-
-      // ─── SUPABASE SYNC ────────────────────────────────────────
-      syncToSupabase: async (table, data, operation = 'upsert') => {
-        set({ syncing: true })
-        try {
-          if (operation === 'upsert') {
-            const { error } = await supabase.from(table).upsert(data)
-            if (error) throw error
-          } else if (operation === 'delete') {
-            const { error } = await supabase.from(table).delete().eq('id', data.id)
-            if (error) throw error
-          }
-        } catch (err) {
-          console.error(`Supabase sync error (${table}):`, err)
-        } finally {
-          set({ syncing: false })
-        }
-      },
-    }),
-    {
-      name: 'edwin-financial-hub',
-      version: 4,
-      migrate: (persisted, version) => {
-        if (version < 2) {
-          persisted = { ...persisted, accounts: { ...persisted.accounts, chaseDebit: 389.82 } }
-        }
-        if (version < 3) {
-          const accounts = { ...persisted.accounts, chaseDebit: 1960.27 }
-          const tiltLogs = (persisted.tiltLogs || []).map(l =>
-            l.id === 'tilt-1' ? { ...l, status: 'repaid', repaidAt: '2026-05-29' } : l
-          )
-          const earnInLogs = defaultEarnInLogs
-          const bills = (persisted.bills || defaultBills).filter(b => b.id !== 'bill-16')
-          const existingIds = new Set((persisted.transactions || []).map(t => t.id))
-          const newTxs = v3Transactions.filter(t => !existingIds.has(t.id))
-          const transactions = [...newTxs, ...(persisted.transactions || [])]
-          const existingPaycheckIds = new Set((persisted.paychecks || []).map(p => p.id))
-          const addedPast = v3NewPaychecks.filter(p => !existingPaycheckIds.has(p.id))
-          const updatedPaychecks = (persisted.paychecks || generatePaychecks()).map(p => {
-            if (p.id === 'paycheck-1') return { ...p, amount: 993.21,  received: true }
-            if (p.id === 'paycheck-2') return { ...p, amount: 1061.47, received: true }
-            return p
-          })
-          const paychecks = [...addedPast, ...updatedPaychecks]
-          const afterpayItems = defaultAfterPayItems
-          const projectedBalance = 2469.45
-          persisted = { ...persisted, accounts, tiltLogs, earnInLogs, bills, transactions, paychecks, afterpayItems, projectedBalance }
-        }
-        if (version < 4) {
-          // Balance update
-          const accounts = { ...persisted.accounts, chaseDebit: 1971.32 }
-
-          // TILT — clear all logs
-          const tiltLogs = []
-
-          // EarnIn — current cycle active (all 4 taken), remove future cycles
-          const earnInLogs = [
-            {
-              id: 'earnin-1',
-              cycleStartDate: '2026-05-29',
-              fri_taken: true,
-              sat_taken: true,
-              sun_taken: true,
-              mon_taken: true,
-              amounts: { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 },
-              repaymentAmount: 521.96,
-              status: 'active',
-            },
-          ]
-
-          // Bills — rent due day 1→3, keep everything else
-          const bills = (persisted.bills || defaultBills).map(b =>
-            b.id === 'bill-7' ? { ...b, dueDay: 3, note: 'Due Jun 3' } : b
-          )
-
-          // Transactions — remove any June 1 rent/housing payment; update tax return
-          const transactions = (persisted.transactions || [])
-            .filter(t => !(
-              t.date === '2026-06-01' &&
-              t.type === 'out' &&
-              (t.category === 'Housing' || (t.note && t.note.toLowerCase().includes('rent')))
-            ))
-            .map(t => {
-              if (t.amount === 1140 && t.type === 'in') {
-                return { ...t, note: 'Tax Return', category: 'Income' }
-              }
-              return t
-            })
-
-          // Pending income — add Wife's Due if not already there
-          const existingPending = persisted.pendingIncome || []
-          const pendingIncome = existingPending.some(p => p.id === 'pending-1')
-            ? existingPending
-            : [
-                ...existingPending,
-                {
-                  id: 'pending-1',
-                  label: "Wife's Due",
-                  amount: 224.57,
-                  details: [
-                    { desc: 'Zelle from Father', amount: 150.00 },
-                    { desc: 'Zelle from Father', amount: 37.00 },
-                    { desc: 'Hot Topic', amount: 12.57 },
-                    { desc: 'Additional', amount: 25.00 },
-                  ],
-                  note: 'More owed, amount pending confirmation',
-                  status: 'pending',
-                  createdAt: '2026-06-02',
-                },
-              ]
-
-          persisted = { ...persisted, accounts, tiltLogs, earnInLogs, bills, transactions, pendingIncome }
-        }
-        return persisted
-      },
-      partialize: (state) => ({
-        theme: state.theme,
-        accounts: state.accounts,
-        projectedBalance: state.projectedBalance,
-        transactions: state.transactions,
-        bills: state.bills,
-        paychecks: state.paychecks,
-        tiltLogs: state.tiltLogs,
-        earnInLogs: state.earnInLogs,
-        afterpayItems: state.afterpayItems,
-        debts: state.debts,
-        savingsGoals: state.savingsGoals,
-        settings: state.settings,
-        pendingIncome: state.pendingIncome,
-      }),
+      set({
+        accounts:        accountsObj,
+        projectedBalance: settingsRow?.projected_balance ?? null,
+        transactions:    (txRows     || []).map(txFromRow),
+        bills:           (billRows   || []).map(billFromRow),
+        paychecks:       (pcRows     || []).map(pcFromRow),
+        tiltLogs:        (tiltRows   || []).map(tiltFromRow),
+        earnInLogs:      (earnInRows || []).map(earnInFromRow),
+        afterpayItems:   (apRows     || []).map(afterpayFromRow),
+        debts:           (debtRows   || []).map(debtFromRow),
+        savingsGoals:    (sgRows     || []).map(savingsFromRow),
+        settings,
+        pendingIncome:   (piRows     || []).map(pendingFromRow),
+        initialized: true,
+      })
+      console.log('[Supabase] Loaded:', {
+        accounts: accRows.length, transactions: txRows?.length,
+        bills: billRows?.length, paychecks: pcRows?.length,
+      })
+      // Auto-deduct overdue bills (Option A)
+      get()._autoProcessBills()
+    } catch (err) {
+      console.error('[Supabase] initialize error:', err)
+      set({ initialized: true }) // unblock UI on unexpected error
     }
-  )
-)
+  },
+
+  // ── AUTO-SEED (runs once on empty database) ────────────────────────────────
+  _seedAll: async () => {
+    const { seedAll } = await import('../lib/supabase-seed.js')
+    await seedAll(supabase)
+  },
+
+  // ── ACCOUNTS ───────────────────────────────────────────────────────────────
+  setAccount: (account, value) => {
+    set(s => ({ accounts: { ...s.accounts, [account]: Number(value) } }))
+    sbUpdateBalance(account, Number(value))
+  },
+  setProjectedBalance: (val) => {
+    set({ projectedBalance: val })
+    sbWrite(
+      supabase.from('settings').upsert({ id: 'singleton', projected_balance: val }, { onConflict: 'id' }),
+      'setProjectedBalance'
+    )
+  },
+
+  // ── TRANSACTIONS ───────────────────────────────────────────────────────────
+  addTransaction: (transaction) => {
+    const newTx = { ...transaction, id: generateId(), createdAt: new Date().toISOString() }
+    const delta = transaction.type === 'in' ? transaction.amount : -transaction.amount
+    set(s => ({
+      transactions: [newTx, ...s.transactions],
+      accounts: { ...s.accounts, [transaction.account]: (s.accounts[transaction.account] || 0) + delta },
+    }))
+    const newBal = get().accounts[transaction.account]
+    sbWrite(supabase.from('transactions').insert([txToRow(newTx)]), 'addTransaction')
+    sbUpdateBalance(transaction.account, newBal)
+    get().addToast('Transaction added', 'success')
+    return newTx
+  },
+
+  updateTransaction: (id, updates) => {
+    set(s => {
+      const old = s.transactions.find(t => t.id === id)
+      const accounts = { ...s.accounts }
+      if (old) {
+        const oldDelta = old.type === 'in' ? -old.amount : old.amount
+        accounts[old.account] = (accounts[old.account] || 0) + oldDelta
+      }
+      const newAmount  = parseFloat(updates.amount  ?? old?.amount)
+      const newType    = updates.type    ?? old?.type
+      const newAccount = updates.account ?? old?.account
+      const newDelta   = newType === 'in' ? newAmount : -newAmount
+      accounts[newAccount] = (accounts[newAccount] || 0) + newDelta
+      return {
+        transactions: s.transactions.map(t => t.id === id ? { ...t, ...updates } : t),
+        accounts,
+      }
+    })
+    const updated = get().transactions.find(t => t.id === id)
+    if (updated) {
+      sbWrite(supabase.from('transactions').update(txToRow(updated)).eq('id', id), 'updateTransaction')
+      sbUpdateBalance(updated.account, get().accounts[updated.account])
+    }
+    get().addToast('Transaction updated', 'success')
+  },
+
+  deleteTransaction: (id) => {
+    set(s => {
+      const tx = s.transactions.find(t => t.id === id)
+      const accounts = { ...s.accounts }
+      if (tx) {
+        const delta = tx.type === 'in' ? -tx.amount : tx.amount
+        accounts[tx.account] = (accounts[tx.account] || 0) + delta
+      }
+      return { transactions: s.transactions.filter(t => t.id !== id), accounts }
+    })
+    sbWrite(supabase.from('transactions').delete().eq('id', id), 'deleteTransaction')
+    get().addToast('Transaction deleted', 'success')
+  },
+
+  // ── BILLS ──────────────────────────────────────────────────────────────────
+  addBill: (bill) => {
+    const newBill = { ...bill, id: generateId() }
+    set(s => ({ bills: [...s.bills, newBill] }))
+    sbWrite(supabase.from('bills').insert([billToRow(newBill)]), 'addBill')
+    get().addToast('Bill added', 'success')
+  },
+
+  updateBill: (id, updates) => {
+    set(s => ({ bills: s.bills.map(b => b.id === id ? { ...b, ...updates } : b) }))
+    const updated = get().bills.find(b => b.id === id)
+    if (updated) sbWrite(supabase.from('bills').update(billToRow(updated)).eq('id', id), 'updateBill')
+    get().addToast('Bill updated', 'success')
+  },
+
+  deleteBill: (id) => {
+    set(s => ({ bills: s.bills.filter(b => b.id !== id) }))
+    sbWrite(supabase.from('bills').delete().eq('id', id), 'deleteBill')
+    get().addToast('Bill deleted', 'success')
+  },
+
+  // ── PAYCHECKS ──────────────────────────────────────────────────────────────
+  addPaycheck: (paycheck) => {
+    const newP = { ...paycheck, id: paycheck.id || generateId() }
+    set(s => ({ paychecks: [newP, ...s.paychecks] }))
+    sbWrite(supabase.from('paychecks').insert([pcToRow(newP)]), 'addPaycheck')
+    get().addToast('Paycheck added', 'success')
+  },
+
+  updatePaycheck: (id, updates) => {
+    set(s => ({ paychecks: s.paychecks.map(p => p.id === id ? { ...p, ...updates } : p) }))
+    const updated = get().paychecks.find(p => p.id === id)
+    if (updated) sbWrite(supabase.from('paychecks').update(pcToRow(updated)).eq('id', id), 'updatePaycheck')
+  },
+
+  deletePaycheck: (id) => {
+    set(s => ({ paychecks: s.paychecks.filter(p => p.id !== id) }))
+    sbWrite(supabase.from('paychecks').delete().eq('id', id), 'deletePaycheck')
+  },
+
+  markPaycheckReceived: (id) => {
+    set(s => ({ paychecks: s.paychecks.map(p => p.id === id ? { ...p, received: true } : p) }))
+    sbWrite(supabase.from('paychecks').update({ received: true }).eq('id', id), 'markPaycheckReceived')
+    get().addToast('Paycheck marked as received', 'success')
+  },
+
+  // ── TILT LOGS ──────────────────────────────────────────────────────────────
+  addTiltLog: (log) => {
+    const newLog = { ...log, id: generateId(), createdAt: new Date().toISOString() }
+    set(s => ({ tiltLogs: [newLog, ...s.tiltLogs] }))
+    sbWrite(supabase.from('tilt_logs').insert([tiltToRow(newLog)]), 'addTiltLog')
+    get().addToast('TILT advance logged', 'success')
+  },
+
+  updateTiltLog: (id, updates) => {
+    set(s => ({ tiltLogs: s.tiltLogs.map(l => l.id === id ? { ...l, ...updates } : l) }))
+    const updated = get().tiltLogs.find(l => l.id === id)
+    if (updated) sbWrite(supabase.from('tilt_logs').update(tiltToRow(updated)).eq('id', id), 'updateTiltLog')
+  },
+
+  deleteTiltLog: (id) => {
+    set(s => ({ tiltLogs: s.tiltLogs.filter(l => l.id !== id) }))
+    sbWrite(supabase.from('tilt_logs').delete().eq('id', id), 'deleteTiltLog')
+  },
+
+  markTiltRepaid: (id) => {
+    const now = format(new Date(), 'yyyy-MM-dd')
+    set(s => ({ tiltLogs: s.tiltLogs.map(l => l.id === id ? { ...l, status: 'repaid', repaidAt: now } : l) }))
+    sbWrite(supabase.from('tilt_logs').update({ status: 'repaid', repaid_at: now }).eq('id', id), 'markTiltRepaid')
+    get().addToast('TILT advance marked as repaid', 'success')
+  },
+
+  // ── EARN IN LOGS ───────────────────────────────────────────────────────────
+  addEarnInLog: (log) => {
+    const newLog = { ...log, id: generateId(), createdAt: new Date().toISOString() }
+    set(s => ({ earnInLogs: [newLog, ...s.earnInLogs] }))
+    sbWrite(supabase.from('earnin_logs').insert([earnInToRow(newLog)]), 'addEarnInLog')
+    get().addToast('Earn In cycle added', 'success')
+  },
+
+  updateEarnInLog: (id, updates) => {
+    set(s => ({ earnInLogs: s.earnInLogs.map(l => l.id === id ? { ...l, ...updates } : l) }))
+    const updated = get().earnInLogs.find(l => l.id === id)
+    if (updated) sbWrite(supabase.from('earnin_logs').update(earnInToRow(updated)).eq('id', id), 'updateEarnInLog')
+  },
+
+  deleteEarnInLog: (id) => {
+    set(s => ({ earnInLogs: s.earnInLogs.filter(l => l.id !== id) }))
+    sbWrite(supabase.from('earnin_logs').delete().eq('id', id), 'deleteEarnInLog')
+  },
+
+  markStepTaken: (logId, step) => {
+    set(s => ({
+      earnInLogs: s.earnInLogs.map(l => l.id === logId ? { ...l, [`${step}_taken`]: true } : l)
+    }))
+    sbWrite(supabase.from('earnin_logs').update({ [`${step}_taken`]: true }).eq('id', logId), 'markStepTaken')
+    get().addToast(`Earn In ${step.charAt(0).toUpperCase() + step.slice(1)} step marked`, 'success')
+  },
+
+  // ── AFTERPAY ───────────────────────────────────────────────────────────────
+  addAfterpayItem: (item) => {
+    const newItem = { ...item, id: generateId() }
+    set(s => ({ afterpayItems: [...s.afterpayItems, newItem] }))
+    sbWrite(supabase.from('afterpay_items').insert([afterpayToRow(newItem)]), 'addAfterpayItem')
+    get().addToast('Afterpay item added', 'success')
+  },
+
+  updateAfterpayItem: (id, updates) => {
+    set(s => ({ afterpayItems: s.afterpayItems.map(i => i.id === id ? { ...i, ...updates } : i) }))
+    const updated = get().afterpayItems.find(i => i.id === id)
+    if (updated) sbWrite(supabase.from('afterpay_items').update(afterpayToRow(updated)).eq('id', id), 'updateAfterpayItem')
+  },
+
+  deleteAfterpayItem: (id) => {
+    set(s => ({ afterpayItems: s.afterpayItems.filter(i => i.id !== id) }))
+    sbWrite(supabase.from('afterpay_items').delete().eq('id', id), 'deleteAfterpayItem')
+  },
+
+  markAfterpayPayment: (itemId, paymentId) => {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    set(s => ({
+      afterpayItems: s.afterpayItems.map(item => {
+        if (item.id !== itemId) return item
+        const payments = item.payments.map(p =>
+          p.id === paymentId ? { ...p, status: 'paid', paidDate: today } : p
+        )
+        sbWrite(supabase.from('afterpay_items').update({ payments }).eq('id', itemId), 'markAfterpayPayment')
+        return { ...item, payments }
+      })
+    }))
+    get().addToast('Afterpay payment marked as paid', 'success')
+  },
+
+  unmarkAfterpayPayment: (itemId, paymentId) => {
+    set(s => ({
+      afterpayItems: s.afterpayItems.map(item => {
+        if (item.id !== itemId) return item
+        const idx = item.payments.findIndex(p => p.id === paymentId)
+        const payments = item.payments.map((p, i) =>
+          p.id === paymentId ? { ...p, status: i === item.payments.length - 1 ? 'final' : 'upcoming', paidDate: null } : p
+        )
+        sbWrite(supabase.from('afterpay_items').update({ payments }).eq('id', itemId), 'unmarkAfterpayPayment')
+        return { ...item, payments }
+      })
+    }))
+    get().addToast('Afterpay payment unmarked', 'success')
+  },
+
+  // ── DEBTS ──────────────────────────────────────────────────────────────────
+  addDebt: (debt) => {
+    const newDebt = { ...debt, id: generateId(), paymentHistory: [] }
+    set(s => ({ debts: [...s.debts, newDebt] }))
+    sbWrite(supabase.from('debts').insert([debtToRow(newDebt)]), 'addDebt')
+    get().addToast('Debt added', 'success')
+  },
+
+  updateDebt: (id, updates) => {
+    set(s => ({ debts: s.debts.map(d => d.id === id ? { ...d, ...updates } : d) }))
+    const updated = get().debts.find(d => d.id === id)
+    if (updated) sbWrite(supabase.from('debts').update(debtToRow(updated)).eq('id', id), 'updateDebt')
+    get().addToast('Debt updated', 'success')
+  },
+
+  deleteDebt: (id) => {
+    set(s => ({ debts: s.debts.filter(d => d.id !== id) }))
+    sbWrite(supabase.from('debts').delete().eq('id', id), 'deleteDebt')
+  },
+
+  logDebtPayment: (debtId, payment) => {
+    const newPayment = { ...payment, id: generateId(), date: format(new Date(), 'yyyy-MM-dd') }
+    set(s => ({
+      debts: s.debts.map(d => {
+        if (d.id !== debtId) return d
+        const newBalance = Math.max(0, d.totalBalance - payment.amount)
+        const updated = { ...d, totalBalance: newBalance, paymentHistory: [newPayment, ...d.paymentHistory] }
+        sbWrite(supabase.from('debts').update(debtToRow(updated)).eq('id', debtId), 'logDebtPayment')
+        return updated
+      })
+    }))
+    get().addToast('Payment logged', 'success')
+  },
+
+  // ── SAVINGS GOALS ──────────────────────────────────────────────────────────
+  addSavingsGoal: (goal) => {
+    const newGoal = { ...goal, id: generateId(), currentAmount: 0, createdAt: new Date().toISOString() }
+    set(s => ({ savingsGoals: [...s.savingsGoals, newGoal] }))
+    sbWrite(supabase.from('savings_goals').insert([savingsToRow(newGoal)]), 'addSavingsGoal')
+    get().addToast('Savings goal created', 'success')
+  },
+
+  updateSavingsGoal: (id, updates) => {
+    set(s => ({ savingsGoals: s.savingsGoals.map(g => g.id === id ? { ...g, ...updates } : g) }))
+    const updated = get().savingsGoals.find(g => g.id === id)
+    if (updated) sbWrite(supabase.from('savings_goals').update(savingsToRow(updated)).eq('id', id), 'updateSavingsGoal')
+    get().addToast('Goal updated', 'success')
+  },
+
+  deleteSavingsGoal: (id) => {
+    set(s => ({ savingsGoals: s.savingsGoals.filter(g => g.id !== id) }))
+    sbWrite(supabase.from('savings_goals').delete().eq('id', id), 'deleteSavingsGoal')
+  },
+
+  contributeToGoal: (id, amount) => {
+    set(s => ({
+      savingsGoals: s.savingsGoals.map(g =>
+        g.id === id ? { ...g, currentAmount: g.currentAmount + Number(amount) } : g
+      )
+    }))
+    const updated = get().savingsGoals.find(g => g.id === id)
+    if (updated) sbWrite(supabase.from('savings_goals').update({ current_amount: updated.currentAmount }).eq('id', id), 'contributeToGoal')
+    get().addToast('Contribution added', 'success')
+  },
+
+  // ── SETTINGS ───────────────────────────────────────────────────────────────
+  updateSettings: (section, updates) => {
+    set(s => ({
+      settings: { ...s.settings, [section]: { ...s.settings[section], ...updates } }
+    }))
+    const s = get().settings
+    const row = {
+      id:           'singleton',
+      earn_in:      s.earnIn,
+      tilt_cfg:     s.tilt,
+      paycheck_cfg: { ...s.paycheck, _billsResetMonth: s.billsResetMonth },
+    }
+    sbWrite(supabase.from('settings').upsert(row, { onConflict: 'id' }), 'updateSettings')
+    get().addToast('Settings saved', 'success')
+  },
+
+  // ── PENDING INCOME ─────────────────────────────────────────────────────────
+  markPendingPaid: (id) => {
+    set(s => {
+      const item = s.pendingIncome.find(p => p.id === id)
+      if (!item || item.status === 'paid') return s
+      const newTx = {
+        id: generateId(), date: format(new Date(), 'yyyy-MM-dd'),
+        type: 'in', amount: item.amount, category: 'Income',
+        note: item.label, account: 'chaseDebit', createdAt: new Date().toISOString(),
+      }
+      const newBal = (s.accounts.chaseDebit || 0) + item.amount
+      sbWrite(supabase.from('pending_income').update({ status: 'paid' }).eq('id', id), 'markPendingPaid')
+      sbWrite(supabase.from('transactions').insert([txToRow(newTx)]), 'markPendingPaid-tx')
+      sbUpdateBalance('chaseDebit', newBal)
+      return {
+        pendingIncome: s.pendingIncome.map(p => p.id === id ? { ...p, status: 'paid' } : p),
+        transactions:  [newTx, ...s.transactions],
+        accounts:      { ...s.accounts, chaseDebit: newBal },
+      }
+    })
+    get().addToast("Wife's Due received — balance updated", 'success')
+  },
+
+  addPendingIncome: (item) => {
+    const newItem = { ...item, id: item.id || generateId() }
+    set(s => ({ pendingIncome: [...s.pendingIncome, newItem] }))
+    sbWrite(supabase.from('pending_income').insert([pendingToRow(newItem)]), 'addPendingIncome')
+  },
+
+  removePendingIncome: (id) => {
+    set(s => ({ pendingIncome: s.pendingIncome.filter(p => p.id !== id) }))
+    sbWrite(supabase.from('pending_income').delete().eq('id', id), 'removePendingIncome')
+  },
+
+  // ── AUTO-PROCESS BILLS (Option A) ──────────────────────────────────────────
+  // Called on every app load. Resets paidThisMonth at start of new month,
+  // then auto-deducts overdue unpaid bills from the Chase balance.
+  // Guards: paidThisMonth flag + deterministic tx ID prevent double-deduction.
+  _autoProcessBills: async () => {
+    const today        = new Date()
+    const currentMonth = format(today, 'yyyy-MM')
+    const currentDay   = today.getDate()
+    const state        = get()
+    const storedMonth  = state.settings.billsResetMonth
+
+    // Monthly reset (only when transitioning to a new month)
+    if (storedMonth !== currentMonth) {
+      if (storedMonth !== null) {
+        // Reset all bills to unpaid for the new month
+        await Promise.all(
+          state.bills.map(b =>
+            supabase.from('bills').update({ paid_this_month: false }).eq('id', b.id)
+          )
+        )
+        set(s => ({ bills: s.bills.map(b => ({ ...b, paidThisMonth: false })) }))
+        console.log('[AutoBill] New month — all bills reset')
+      }
+      const newPaycheckCfg = { ...get().settings.paycheck, _billsResetMonth: currentMonth }
+      await supabase.from('settings').upsert(
+        { id: 'singleton', paycheck_cfg: newPaycheckCfg },
+        { onConflict: 'id' }
+      )
+      set(s => ({ settings: { ...s.settings, billsResetMonth: currentMonth } }))
+    }
+
+    // Find bills that are past their due date and haven't been paid
+    const overdue = get().bills.filter(b =>
+      b.isActive &&
+      b.frequency === 'monthly' &&
+      b.dueDay &&
+      b.dueDay <= currentDay &&
+      !b.paidThisMonth &&
+      b.amount > 0
+    )
+    if (overdue.length === 0) return
+
+    console.log(`[AutoBill] Auto-deducting ${overdue.length} overdue bill(s)`)
+
+    for (const bill of overdue) {
+      const txDate = format(new Date(today.getFullYear(), today.getMonth(), bill.dueDay), 'yyyy-MM-dd')
+      const txId   = `auto-bill-${bill.id}-${currentMonth}`
+
+      // Re-run guard: skip if we already inserted this auto-bill transaction
+      const { data: existing } = await supabase.from('transactions').select('id').eq('id', txId)
+      if (existing && existing.length > 0) {
+        await supabase.from('bills').update({ paid_this_month: true }).eq('id', bill.id)
+        set(s => ({ bills: s.bills.map(b => b.id === bill.id ? { ...b, paidThisMonth: true } : b) }))
+        continue
+      }
+
+      const newTx = {
+        id: txId, date: txDate, type: 'out', amount: bill.amount,
+        category: bill.category || 'Bills', note: bill.name,
+        account: 'chaseDebit', isOneTime: false, createdAt: new Date().toISOString(),
+      }
+
+      const { error: txErr } = await supabase.from('transactions').insert([txToRow(newTx)])
+      if (txErr) { console.error('[AutoBill] Insert failed for', bill.name, txErr.message); continue }
+
+      const newBal = parseFloat(((get().accounts.chaseDebit || 0) - bill.amount).toFixed(2))
+      sbUpdateBalance('chaseDebit', newBal)
+      await supabase.from('bills').update({ paid_this_month: true }).eq('id', bill.id)
+
+      set(s => ({
+        transactions: [newTx, ...s.transactions],
+        accounts:     { ...s.accounts, chaseDebit: newBal },
+        bills:        s.bills.map(b => b.id === bill.id ? { ...b, paidThisMonth: true } : b),
+      }))
+      console.log(`[AutoBill] ${bill.name} — -$${bill.amount.toFixed(2)} on ${txDate}`)
+    }
+  },
+}))
