@@ -64,9 +64,9 @@ export function LoadingSplash({ onComplete }) {
             className="mb-8"
           >
             <img
-              src="/EdwinBernalLogo.png"
+              src="/logo-dark.png"
               alt="Edwin Bernal"
-              style={{ width: '180px', height: '180px', objectFit: 'contain' }}
+              style={{ width: '320px', height: '320px', objectFit: 'contain' }}
             />
           </motion.div>
 

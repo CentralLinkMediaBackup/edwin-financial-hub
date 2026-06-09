@@ -92,18 +92,14 @@ export function Sidebar() {
         style={{ backgroundColor: 'var(--bg-panel)', width: '220px', minWidth: '220px' }}
       >
         {/* Logo / Brand */}
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+        <div className="flex flex-col items-center px-5 py-4 border-b border-white/10">
           <img
-            src="/EdwinBernalLogo.png"
+            src="/logo-dark.png"
             alt="Edwin Bernal"
-            className="w-9 h-9 object-contain flex-shrink-0"
+            className="w-full object-contain"
+            style={{ maxHeight: '90px' }}
           />
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-white truncate" style={{ fontFamily: "'Sora', sans-serif" }}>
-              Edwin Bernal
-            </p>
-            <p className="text-[10px] text-slate-500 truncate">Financial Hub</p>
-          </div>
+          <p className="text-[10px] text-slate-500 mt-1 tracking-wider">Financial Hub</p>
         </div>
 
         {/* Nav */}
@@ -159,23 +155,19 @@ export function Sidebar() {
               transition={{ type: 'spring', stiffness: 360, damping: 36 }}
             >
               {/* Drawer header */}
-              <div className="flex items-center justify-between px-5 py-5 border-b border-white/10 flex-shrink-0">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">
+                <div className="flex flex-col flex-1 min-w-0">
                   <img
-                    src="/EdwinBernalLogo.png"
+                    src="/logo-dark.png"
                     alt="Edwin Bernal"
-                    className="w-9 h-9 object-contain flex-shrink-0"
+                    className="object-contain"
+                    style={{ maxHeight: '80px', width: '100%' }}
                   />
-                  <div>
-                    <p className="text-sm font-semibold text-white" style={{ fontFamily: "'Sora', sans-serif" }}>
-                      Edwin Bernal
-                    </p>
-                    <p className="text-[10px] text-slate-500">Financial Hub</p>
-                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 tracking-wider text-center">Financial Hub</p>
                 </div>
                 <button
                   onClick={() => setDrawerOpen(false)}
-                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                  className="p-2 ml-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
                   aria-label="Close menu"
                 >
                   <X size={18} />
