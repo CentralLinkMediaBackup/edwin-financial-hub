@@ -1,5 +1,6 @@
-import { NavLink, useLocation } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { useState } from 'react'
+import { NavLink } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard,
   Calendar,
@@ -12,20 +13,22 @@ import {
   DollarSign,
   Bell,
   Settings,
+  Menu,
+  X,
 } from 'lucide-react'
 
 const navItems = [
-  { path: '/',             icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/calendar',    icon: Calendar,        label: 'Calendar' },
-  { path: '/expenses',    icon: Receipt,         label: 'Transaction Tracker' },
-  { path: '/debts',       icon: CreditCard,      label: 'Debts' },
-  { path: '/tilt',        icon: Zap,             label: 'TILT' },
-  { path: '/earnin',      icon: TrendingUp,      label: 'Earn In' },
-  { path: '/afterpay',    icon: ShoppingBag,     label: 'Afterpay' },
-  { path: '/savings',     icon: PiggyBank,       label: 'Savings' },
-  { path: '/paychecks',   icon: DollarSign,      label: 'Paychecks' },
-  { path: '/subscriptions', icon: Bell,          label: 'Monthly Subs' },
-  { path: '/settings',   icon: Settings,         label: 'Settings' },
+  { path: '/',              icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/calendar',     icon: Calendar,        label: 'Calendar' },
+  { path: '/expenses',     icon: Receipt,         label: 'Transaction Tracker' },
+  { path: '/debts',        icon: CreditCard,      label: 'Debts' },
+  { path: '/tilt',         icon: Zap,             label: 'TILT' },
+  { path: '/earnin',       icon: TrendingUp,      label: 'Earn In' },
+  { path: '/afterpay',     icon: ShoppingBag,     label: 'Afterpay' },
+  { path: '/savings',      icon: PiggyBank,       label: 'Savings' },
+  { path: '/paychecks',    icon: DollarSign,      label: 'Paychecks' },
+  { path: '/subscriptions',icon: Bell,            label: 'Monthly Subs' },
+  { path: '/settings',     icon: Settings,        label: 'Settings' },
 ]
 
 function NavItem({ item, collapsed }) {
@@ -79,21 +82,22 @@ function NavItem({ item, collapsed }) {
 }
 
 export function Sidebar() {
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
   return (
     <>
-      {/* Desktop Sidebar */}
+      {/* ── Desktop Sidebar (unchanged) ───────────────────────────────────────── */}
       <aside
         className="hidden md:flex flex-col h-screen sticky top-0 border-r border-white/10"
         style={{ backgroundColor: 'var(--bg-panel)', width: '220px', minWidth: '220px' }}
       >
         {/* Logo / Brand */}
         <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0"
-            style={{ backgroundColor: '#F59E0B', color: '#0A0E1A', fontFamily: "'Sora', sans-serif" }}
-          >
-            EB
-          </div>
+          <img
+            src="/EdwinBernalLogo.png"
+            alt="Edwin Bernal"
+            className="w-9 h-9 object-contain flex-shrink-0"
+          />
           <div className="min-w-0">
             <p className="text-sm font-semibold text-white truncate" style={{ fontFamily: "'Sora', sans-serif" }}>
               Edwin Bernal
@@ -110,57 +114,105 @@ export function Sidebar() {
         </nav>
       </aside>
 
-      {/* Tablet Collapsed Sidebar */}
-      {/* (handled by making desktop sidebar narrower via CSS) */}
-
-      {/* Mobile Bottom Tab Bar */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 flex items-center justify-around px-2 py-2"
-        style={{ backgroundColor: 'var(--bg-panel)' }}
+      {/* ── Mobile: Floating circle menu button ───────────────────────────────── */}
+      <button
+        className="md:hidden fixed top-4 left-4 z-40 w-10 h-10 rounded-full flex items-center justify-center"
+        style={{
+          backgroundColor: 'rgba(15, 22, 41, 0.82)',
+          border: '1px solid rgba(255, 255, 255, 0.13)',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
+        }}
+        onClick={() => setDrawerOpen(true)}
+        aria-label="Open navigation menu"
       >
-        {navItems.slice(0, 6).map((item) => {
-          const Icon = item.icon
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === '/'}
-              className={({ isActive }) =>
-                `flex flex-col items-center gap-1 px-2 py-1 rounded-lg transition-colors ${
-                  isActive ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'
-                }`
-              }
+        <Menu size={17} className="text-slate-300" />
+      </button>
+
+      {/* ── Mobile: Nav Drawer ────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {drawerOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              className="md:hidden fixed inset-0 z-[45] bg-black/60 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setDrawerOpen(false)}
+            />
+
+            {/* Drawer panel */}
+            <motion.div
+              className="md:hidden fixed top-0 left-0 bottom-0 z-[46] flex flex-col overflow-hidden"
+              style={{
+                width: '280px',
+                backgroundColor: 'var(--bg-panel)',
+                borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+                boxShadow: '4px 0 32px rgba(0,0,0,0.5)',
+              }}
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 36 }}
             >
-              {({ isActive }) => (
-                <>
-                  <div className={`p-1.5 rounded-lg transition-colors ${isActive ? 'bg-amber-400/15' : ''}`}>
-                    <Icon size={18} />
+              {/* Drawer header */}
+              <div className="flex items-center justify-between px-5 py-5 border-b border-white/10 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <img
+                    src="/EdwinBernalLogo.png"
+                    alt="Edwin Bernal"
+                    className="w-9 h-9 object-contain flex-shrink-0"
+                  />
+                  <div>
+                    <p className="text-sm font-semibold text-white" style={{ fontFamily: "'Sora', sans-serif" }}>
+                      Edwin Bernal
+                    </p>
+                    <p className="text-[10px] text-slate-500">Financial Hub</p>
                   </div>
-                  <span className="text-[9px] leading-none font-medium">{item.label.split(' ')[0]}</span>
-                </>
-              )}
-            </NavLink>
-          )
-        })}
-        {/* More button for remaining tabs */}
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            `flex flex-col items-center gap-1 px-2 py-1 rounded-lg transition-colors ${
-              isActive ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'
-            }`
-          }
-        >
-          {({ isActive }) => (
-            <>
-              <div className={`p-1.5 rounded-lg transition-colors ${isActive ? 'bg-amber-400/15' : ''}`}>
-                <Settings size={18} />
+                </div>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                  aria-label="Close menu"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <span className="text-[9px] leading-none font-medium">More</span>
-            </>
-          )}
-        </NavLink>
-      </nav>
+
+              {/* Nav items */}
+              <nav className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-0.5">
+                {navItems.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      end={item.path === '/'}
+                      onClick={() => setDrawerOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 relative ${
+                          isActive ? 'text-amber-400' : 'text-slate-400'
+                        }`
+                      }
+                      style={({ isActive }) =>
+                        isActive
+                          ? { backgroundColor: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.25)' }
+                          : {}
+                      }
+                    >
+                      <Icon size={18} className="flex-shrink-0" />
+                      <span className="text-sm font-medium">{item.label}</span>
+                    </NavLink>
+                  )
+                })}
+              </nav>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </>
   )
 }

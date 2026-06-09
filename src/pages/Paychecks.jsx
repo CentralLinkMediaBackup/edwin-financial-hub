@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { DollarSign, Plus, Trash2, Pencil, X, Check, Clock } from 'lucide-react'
+import { DollarSign, Plus, Trash2, Pencil, X, Check, Clock, FileText } from 'lucide-react'
 import { format, parseISO, isAfter, isBefore, startOfDay, addDays } from 'date-fns'
 import { useStore } from '../store/useStore'
 import { formatCurrency, formatDate } from '../lib/formatters'
@@ -490,6 +490,42 @@ export default function Paychecks() {
           </div>
         </div>
       </div>
+
+      {/* W2 Summary — Tax Year 2025 */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="card-glass overflow-hidden mb-6"
+      >
+        <div className="p-4 border-b border-white/10 flex items-center gap-2">
+          <FileText size={16} className="text-amber-400" />
+          <h2 className="text-base font-semibold text-white">W-2 Summary — Tax Year 2025</h2>
+          <span className="ml-auto text-xs text-slate-500">Prosperity Fire Protection, LLC</span>
+        </div>
+        <div className="divide-y divide-white/5">
+          {[
+            { box: 'Box 1',  label: 'Total Wages',            amount: 24959.82, color: 'text-emerald-400' },
+            { box: 'Box 2',  label: 'Federal Tax Withheld',   amount: 2063.15,  color: 'text-red-400' },
+            { box: 'Box 4',  label: 'Social Security Tax',    amount: 1547.51,  color: 'text-red-400' },
+            { box: 'Box 6',  label: 'Medicare Tax',           amount: 361.92,   color: 'text-red-400' },
+          ].map(({ box, label, amount, color }) => (
+            <div key={box} className="flex items-center justify-between px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 w-10">{box}</span>
+                <span className="text-sm text-slate-300">{label}</span>
+              </div>
+              <span className={`font-mono font-bold text-sm ${color}`}>${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between px-4 py-3 bg-white/5">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-500 w-10"></span>
+              <span className="text-sm font-semibold text-white">Total Tax Paid</span>
+            </div>
+            <span className="font-mono font-bold text-sm text-amber-400">$3,972.58</span>
+          </div>
+        </div>
+      </motion.div>
 
       {/* Modals */}
       <AnimatePresence>

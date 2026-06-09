@@ -60,6 +60,34 @@ const CLAUDE_TOOLS = [
     },
   },
   {
+    name: 'update_transaction',
+    description: 'Edit an existing transaction — change amount, category, note, date, or account',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:       { type: 'string', description: 'Transaction ID to update' },
+        amount:   { type: 'number', description: 'New amount in dollars' },
+        type:     { type: 'string', description: '"in" or "out"' },
+        category: { type: 'string', description: 'New category' },
+        note:     { type: 'string', description: 'New note/description' },
+        account:  { type: 'string', description: 'New account key' },
+        date:     { type: 'string', description: 'New date YYYY-MM-DD' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_transaction',
+    description: 'Delete a transaction by ID',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Transaction ID to delete' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'update_account_balance',
     description: "Update the balance of one of the user's accounts",
     input_schema: {
@@ -86,6 +114,58 @@ const CLAUDE_TOOLS = [
     },
   },
   {
+    name: 'update_pending_income',
+    description: "Update a pending income entry — change amount, add/edit breakdown items, or update the note. Use this to add a new line item to Wife's Due or any pending income entry.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:      { type: 'string', description: 'Pending income ID (e.g. "pending-1")' },
+        amount:  { type: 'number', description: 'New total amount in dollars' },
+        details: {
+          type: 'array',
+          description: 'Full updated breakdown array — include ALL existing items plus any new ones',
+          items: {
+            type: 'object',
+            properties: {
+              desc:   { type: 'string' },
+              amount: { type: 'number' },
+            },
+          },
+        },
+        note:   { type: 'string', description: 'Updated note' },
+        label:  { type: 'string', description: 'Updated label/title' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'mark_pending_income_paid',
+    description: "Mark a pending income entry as received/paid — adds the amount to Chase balance and marks it paid",
+    input_schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Pending income ID to mark as paid' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'update_bill',
+    description: 'Update a bill — change amount, due day, name, or mark it paid/unpaid this month',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:            { type: 'string',  description: 'Bill ID to update' },
+        amount:        { type: 'number',  description: 'New bill amount' },
+        dueDay:        { type: 'number',  description: 'New due day of month (1-31)' },
+        name:          { type: 'string',  description: 'New bill name' },
+        paidThisMonth: { type: 'boolean', description: 'true to mark paid this month, false to unmark' },
+        isActive:      { type: 'boolean', description: 'true to activate, false to deactivate' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'mark_earnin_step',
     description: 'Mark an Earn In step as taken or untaken for the current cycle',
     input_schema: {
@@ -107,6 +187,21 @@ const CLAUDE_TOOLS = [
         amount: { type: 'number', description: 'Amount to deposit' },
       },
       required: ['goalId', 'amount'],
+    },
+  },
+  {
+    name: 'update_debt',
+    description: 'Update a debt entry — change balance, minimum payment, APR, or name',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:             { type: 'string', description: 'Debt ID to update' },
+        totalBalance:   { type: 'number', description: 'New total balance owed' },
+        minimumPayment: { type: 'number', description: 'New minimum monthly payment' },
+        apr:            { type: 'number', description: 'New APR percentage' },
+        name:           { type: 'string', description: 'New debt name/label' },
+      },
+      required: ['id'],
     },
   },
 ]
@@ -229,7 +324,7 @@ ${dayLines}
           ? format(new Date(yr, mo,     b.dueDay), 'MMM d')
           : format(new Date(yr, mo + 1, b.dueDay), 'MMM d'))
       : 'Flexible'
-    return `  - ${b.name} (${b.category}): $${b.amount.toFixed(2)} | ${b.frequency} | due ${nextDue}${b.paidThisMonth ? ' PAID THIS MONTH' : ''}`
+    return `  - [id: ${b.id}] ${b.name} (${b.category}): $${b.amount.toFixed(2)} | ${b.frequency} | due ${nextDue}${b.paidThisMonth ? ' PAID THIS MONTH' : ''}`
   }).join('\n')
 
   // ── Paychecks ────────────────────────────────────────────────────────────────
@@ -261,8 +356,8 @@ ${dayLines}
   const pendingIncome = store.pendingIncome || []
   const pendingLines = pendingIncome.length > 0
     ? pendingIncome.map(p =>
-        `  - ${p.label}: $${p.amount.toFixed(2)} — ${p.status==='paid'?'PAID (counted in balance)':'PENDING — NOT in balance yet'}\n`
-        + `    Breakdown: ${(p.details||[]).map(d=>`${d.desc} $${d.amount.toFixed(2)}`).join(', ')}\n`
+        `  - [id: ${p.id}] ${p.label}: $${p.amount.toFixed(2)} — ${p.status==='paid'?'PAID (counted in balance)':'PENDING — NOT in balance yet'}\n`
+        + `    Breakdown: ${(p.details||[]).map(d=>`${d.desc} $${Number(d.amount).toFixed(2)}`).join(', ')}\n`
         + `    Note: ${p.note||''}`
       ).join('\n')
     : '  - None'
@@ -272,7 +367,7 @@ ${dayLines}
   const totalDebt = debts.reduce((s,d)=>s+d.totalBalance, 0)
   const debtLines = debts.map(d => {
     const months = d.minimumPayment>0 ? Math.ceil(d.totalBalance/d.minimumPayment) : '∞'
-    return `  - ${d.name}: $${d.totalBalance.toFixed(2)} balance | $${d.minimumPayment}/mo min | APR ${d.apr||0}% | ~${months} mo payoff | ${(d.paymentHistory||[]).length} payments logged`
+    return `  - [id: ${d.id}] ${d.name}: $${d.totalBalance.toFixed(2)} balance | $${d.minimumPayment}/mo min | APR ${d.apr||0}% | ~${months} mo payoff | ${(d.paymentHistory||[]).length} payments logged`
   }).join('\n') || '  - No debts logged'
 
   // ── Savings ──────────────────────────────────────────────────────────────────
@@ -439,12 +534,21 @@ SPENDING CHECK PROTOCOL:
   Step 4 — Subtract purchase, re-check all 30 days for sub-$20 balance
   Step 5 — Answer: YES (show new lowest) / NO (show which day fails + max safe) / MAX SAFE AMOUNT
 
-AVAILABLE ACTIONS (use tool calls — never simulate):
-  - Log any expense or income transaction
-  - Update account balances
+AVAILABLE ACTIONS — FULL WRITE ACCESS (use tool calls — never simulate, never tell Edwin to do it manually):
+  - Log, edit, or delete any transaction
+  - Update any account balance
   - Log one-time income
+  - Update any pending income entry (amount, breakdown items, note) — including Wife's Due
+  - Mark pending income as received/paid
+  - Update any bill (amount, due date, paid status, active status)
   - Mark EarnIn steps taken/untaken
   - Log savings deposits
+  - Update any debt (balance, minimum payment, APR)
+
+WRITE RULES — MANDATORY:
+  - When Edwin asks you to update, change, add, edit, or fix any data — execute the tool call immediately. Do NOT say "you can update this manually" or redirect Edwin to the UI.
+  - Always confirm what you changed after the tool call completes.
+  - For pending income updates that add a new line item: include ALL existing details plus the new one in the details array.
 
 RESPONSE FORMAT — MANDATORY:
   Plain text only — NEVER markdown (no **, no *, no ##, no backticks).
@@ -624,10 +728,37 @@ export function AIAssistant() {
             createdAt: new Date().toISOString(),
           })
           actionResult = `✅ Logged ${args.type === 'in' ? 'income' : 'expense'} of $${args.amount.toFixed(2)} for ${args.category}${args.note ? ` — "${args.note}"` : ''}.`
+
+        } else if (name === 'update_transaction') {
+          const existing = (store.transactions || []).find(t => t.id === args.id)
+          if (existing) {
+            const updates = {}
+            if (args.amount   !== undefined) updates.amount   = args.amount
+            if (args.type     !== undefined) updates.type     = args.type
+            if (args.category !== undefined) updates.category = args.category
+            if (args.note     !== undefined) updates.note     = args.note
+            if (args.account  !== undefined) updates.account  = args.account
+            if (args.date     !== undefined) updates.date     = args.date
+            store.updateTransaction(args.id, updates)
+            actionResult = `✅ Updated transaction${args.note ? ` "${args.note}"` : ` ${args.id}`}.`
+          } else {
+            actionResult = `⚠️ Transaction ${args.id} not found.`
+          }
+
+        } else if (name === 'delete_transaction') {
+          const existing = (store.transactions || []).find(t => t.id === args.id)
+          if (existing) {
+            store.deleteTransaction(args.id)
+            actionResult = `✅ Deleted transaction — ${existing.note || args.id} ($${existing.amount?.toFixed(2)}).`
+          } else {
+            actionResult = `⚠️ Transaction ${args.id} not found.`
+          }
+
         } else if (name === 'update_account_balance') {
           store.setAccount(args.account, args.balance)
           const accountNames = { chaseDebit: 'Chase', capitalOneDebit: 'Capital One', cashApp: 'Cash App', paypal: 'PayPal' }
           actionResult = `✅ Updated ${accountNames[args.account] || args.account} balance to $${args.balance.toFixed(2)}.`
+
         } else if (name === 'log_one_time_income') {
           store.addPaycheck({
             id: `paycheck-ot-${Date.now()}`,
@@ -639,6 +770,55 @@ export function AIAssistant() {
             received: true,
           })
           actionResult = `✅ Logged $${args.amount.toFixed(2)} from "${args.source}"${args.note ? ` — ${args.note}` : ''}.`
+
+        } else if (name === 'update_pending_income') {
+          const existing = (store.pendingIncome || []).find(p => p.id === args.id)
+          if (existing) {
+            const updates = {}
+            if (args.amount  !== undefined) updates.amount  = args.amount
+            if (args.details !== undefined) updates.details = args.details
+            if (args.note    !== undefined) updates.note    = args.note
+            if (args.label   !== undefined) updates.label   = args.label
+            store.updatePendingIncome(args.id, updates)
+            const label = args.label || existing.label
+            const newAmt = args.amount ?? existing.amount
+            actionResult = `✅ Updated "${label}" — new total: $${newAmt.toFixed(2)}.`
+            if (args.details) {
+              const lines = args.details.map(d => `  ${d.desc}: $${Number(d.amount).toFixed(2)}`).join('\n')
+              actionResult += `\nBreakdown:\n${lines}`
+            }
+          } else {
+            actionResult = `⚠️ Pending income entry ${args.id} not found.`
+          }
+
+        } else if (name === 'mark_pending_income_paid') {
+          const existing = (store.pendingIncome || []).find(p => p.id === args.id)
+          if (existing) {
+            store.markPendingPaid(args.id)
+            actionResult = `✅ Marked "${existing.label}" as received — $${existing.amount.toFixed(2)} added to Chase balance.`
+          } else {
+            actionResult = `⚠️ Pending income entry ${args.id} not found.`
+          }
+
+        } else if (name === 'update_bill') {
+          const existing = (store.bills || []).find(b => b.id === args.id)
+          if (existing) {
+            const updates = {}
+            if (args.amount        !== undefined) updates.amount        = args.amount
+            if (args.dueDay        !== undefined) updates.dueDay        = args.dueDay
+            if (args.name          !== undefined) updates.name          = args.name
+            if (args.paidThisMonth !== undefined) updates.paidThisMonth = args.paidThisMonth
+            if (args.isActive      !== undefined) updates.isActive      = args.isActive
+            store.updateBill(args.id, updates)
+            const billName = args.name || existing.name
+            actionResult = `✅ Updated bill "${billName}".`
+            if (args.amount        !== undefined) actionResult += ` Amount: $${args.amount.toFixed(2)}.`
+            if (args.dueDay        !== undefined) actionResult += ` Due day: ${args.dueDay}.`
+            if (args.paidThisMonth !== undefined) actionResult += ` Paid this month: ${args.paidThisMonth ? 'yes' : 'no'}.`
+          } else {
+            actionResult = `⚠️ Bill ${args.id} not found.`
+          }
+
         } else if (name === 'mark_earnin_step') {
           const activeLog = store.earnInLogs.find(l => l.status === 'active')
           if (activeLog) {
@@ -647,6 +827,7 @@ export function AIAssistant() {
           } else {
             actionResult = '⚠️ No active Earn In cycle found.'
           }
+
         } else if (name === 'log_savings_deposit') {
           const goal = (store.savingsGoals || []).find(g => g.id === args.goalId)
           if (goal) {
@@ -657,6 +838,23 @@ export function AIAssistant() {
           } else {
             actionResult = '⚠️ Savings goal not found.'
           }
+
+        } else if (name === 'update_debt') {
+          const existing = (store.debts || []).find(d => d.id === args.id)
+          if (existing) {
+            const updates = {}
+            if (args.totalBalance   !== undefined) updates.totalBalance   = args.totalBalance
+            if (args.minimumPayment !== undefined) updates.minimumPayment = args.minimumPayment
+            if (args.apr            !== undefined) updates.apr            = args.apr
+            if (args.name           !== undefined) updates.name           = args.name
+            store.updateDebt(args.id, updates)
+            const debtName = args.name || existing.name
+            actionResult = `✅ Updated debt "${debtName}".`
+            if (args.totalBalance !== undefined) actionResult += ` Balance: $${args.totalBalance.toFixed(2)}.`
+          } else {
+            actionResult = `⚠️ Debt ${args.id} not found.`
+          }
+
         } else {
           actionResult = `✅ Action "${name}" executed.`
         }

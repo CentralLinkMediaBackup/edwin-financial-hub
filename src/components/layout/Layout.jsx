@@ -57,7 +57,7 @@ export function Layout({ children }) {
             animate="animate"
             exit="exit"
             transition={pageTransition}
-            className="min-h-full pb-20 md:pb-0"
+            className="min-h-full pt-16 pb-24 md:pt-0 md:pb-0"
           >
             {children}
           </motion.div>

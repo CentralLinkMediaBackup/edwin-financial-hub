@@ -6,7 +6,7 @@ import {
 import {
   Plus, Search, Download, Pencil, Trash2,
   Check, X, Utensils, CreditCard, Car, ShoppingCart,
-  HeartPulse, MoreHorizontal, FileText, Clock
+  HeartPulse, MoreHorizontal, FileText, Clock, ChevronDown
 } from 'lucide-react'
 import { format, parseISO, startOfMonth, endOfMonth, isAfter, isBefore } from 'date-fns'
 import { Modal } from '../components/ui/Modal'
@@ -208,6 +208,7 @@ export default function ExpensesTracker() {
   const [showAdd, setShowAdd] = useState(false)
   const [editTx, setEditTx] = useState(null)
   const [deleteTx, setDeleteTx] = useState(null)
+  const [expandedTxId, setExpandedTxId] = useState(null)
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('All')
   const [filterAccount, setFilterAccount] = useState('All')
@@ -429,6 +430,7 @@ export default function ExpensesTracker() {
                 const Icon = CATEGORY_ICONS[tx.category] || MoreHorizontal
                 const color = CATEGORY_COLORS[tx.category] || '#64748B'
                 const accountLabel = ACCOUNTS.find(a => a.value === tx.account)?.label || tx.account
+                const isExpanded = expandedTxId === tx.id
 
                 return (
                   <motion.div
@@ -437,50 +439,122 @@ export default function ExpensesTracker() {
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 8 }}
                     transition={{ duration: 0.2, delay: i * 0.02 }}
-                    className="grid grid-cols-[auto_1fr_1fr_1fr_auto_auto] gap-3 px-4 py-3 border-b border-white/5 last:border-0 items-center hover:bg-white/[0.02] transition-colors"
+                    className="border-b border-white/5 last:border-0"
                   >
-                    {/* Icon */}
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                      style={{ backgroundColor: `${color}20` }}>
-                      <Icon size={13} style={{ color }} />
+                    {/* Main row */}
+                    <div
+                      className="grid grid-cols-[auto_1fr_1fr_1fr_auto_auto] gap-3 px-4 py-3 items-center hover:bg-white/[0.02] transition-colors sm:cursor-default cursor-pointer"
+                      onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}
+                    >
+                      {/* Icon */}
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{ backgroundColor: `${color}20` }}>
+                        <Icon size={13} style={{ color }} />
+                      </div>
+
+                      {/* Note / Category */}
+                      <div className="min-w-0">
+                        <p className="text-sm text-white truncate">{tx.note || '—'}</p>
+                        <p className="text-xs text-slate-500">{tx.category}</p>
+                      </div>
+
+                      {/* Account — desktop only */}
+                      <div className="hidden sm:block text-xs text-slate-400">{accountLabel}</div>
+
+                      {/* Date — desktop only */}
+                      <div className="hidden sm:block text-xs text-slate-400">
+                        {format(parseISO(tx.date), 'MMM d, yyyy')}
+                      </div>
+
+                      {/* Amount */}
+                      <div className={`text-sm font-mono font-medium text-right ${tx.type === 'in' ? 'text-emerald-400' : 'text-slate-300'}`}>
+                        {tx.type === 'in' ? '+' : '-'}{formatCurrency(tx.amount)}
+                      </div>
+
+                      {/* Actions: edit/delete on desktop, chevron on mobile */}
+                      <div className="flex gap-1 justify-center items-center w-16">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditTx(tx) }}
+                          className="hidden sm:flex p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-400/10 transition-colors"
+                          title="Edit"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteTx(tx) }}
+                          className="hidden sm:flex p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                        <motion.div
+                          className="sm:hidden text-slate-500"
+                          animate={{ rotate: isExpanded ? 180 : 0 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <ChevronDown size={15} />
+                        </motion.div>
+                      </div>
                     </div>
 
-                    {/* Note / Category */}
-                    <div className="min-w-0">
-                      <p className="text-sm text-white truncate">{tx.note || '—'}</p>
-                      <p className="text-xs text-slate-500">{tx.category}</p>
-                    </div>
-
-                    {/* Account */}
-                    <div className="hidden sm:block text-xs text-slate-400">{accountLabel}</div>
-
-                    {/* Date */}
-                    <div className="hidden sm:block text-xs text-slate-400">
-                      {format(parseISO(tx.date), 'MMM d, yyyy')}
-                    </div>
-
-                    {/* Amount */}
-                    <div className={`text-sm font-mono font-medium text-right ${tx.type === 'in' ? 'text-emerald-400' : 'text-slate-300'}`}>
-                      {tx.type === 'in' ? '+' : '-'}{formatCurrency(tx.amount)}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-1 justify-center">
-                      <button
-                        onClick={() => setEditTx(tx)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-400/10 transition-colors"
-                        title="Edit"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTx(tx)}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
+                    {/* Mobile expanded detail panel — hidden on sm+ */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          className="sm:hidden overflow-hidden"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22, ease: 'easeInOut' }}
+                        >
+                          <div
+                            className="mx-4 mb-3 rounded-xl p-3 space-y-2.5"
+                            style={{ backgroundColor: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+                          >
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-500">Date</span>
+                              <span className="text-xs text-slate-300">{format(parseISO(tx.date), 'MMMM d, yyyy')}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-500">Account</span>
+                              <span className="text-xs text-slate-300">{accountLabel}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-500">Category</span>
+                              <span className="text-xs text-slate-300">{tx.category}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs text-slate-500">Type</span>
+                              <span className={`text-xs font-medium ${tx.type === 'in' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {tx.type === 'in' ? 'Income' : 'Expense'}
+                              </span>
+                            </div>
+                            {tx.note && (
+                              <div className="flex justify-between items-start gap-4">
+                                <span className="text-xs text-slate-500 flex-shrink-0">Note</span>
+                                <span className="text-xs text-slate-300 text-right">{tx.note}</span>
+                              </div>
+                            )}
+                            <div className="flex gap-2 pt-1.5 border-t border-white/10">
+                              <button
+                                onClick={() => { setEditTx(tx); setExpandedTxId(null) }}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-amber-400 border border-amber-400/25 hover:bg-amber-400/10 transition-colors"
+                              >
+                                <Pencil size={11} />
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => { setDeleteTx(tx); setExpandedTxId(null) }}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-red-400 border border-red-400/25 hover:bg-red-400/10 transition-colors"
+                              >
+                                <Trash2 size={11} />
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </motion.div>
                 )
               })}

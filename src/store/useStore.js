@@ -265,7 +265,7 @@ export const useStore = create((set, get) => ({
   settings: {
     earnIn:   { repaymentAmount: 521.96, fri: 155.99, sat: 155.99, sun: 105.99, mon: 53.99 },
     tilt:     { maxCredit: 400, instantFee: 12 },
-    paycheck: { defaultAmount: 980, frequency: 'weekly' },
+    paycheck: { defaultAmount: 986, frequency: 'weekly' },
     billsResetMonth: null,
   },
   pendingIncome: [],
@@ -683,6 +683,14 @@ export const useStore = create((set, get) => ({
     const newItem = { ...item, id: item.id || generateId() }
     set(s => ({ pendingIncome: [...s.pendingIncome, newItem] }))
     sbWrite(supabase.from('pending_income').insert([pendingToRow(newItem)]), 'addPendingIncome')
+  },
+
+  updatePendingIncome: (id, updates) => {
+    set(s => ({
+      pendingIncome: s.pendingIncome.map(p => p.id === id ? { ...p, ...updates } : p),
+    }))
+    const updated = useStore.getState().pendingIncome.find(p => p.id === id)
+    if (updated) sbWrite(supabase.from('pending_income').update(pendingToRow(updated)).eq('id', id), 'updatePendingIncome')
   },
 
   removePendingIncome: (id) => {

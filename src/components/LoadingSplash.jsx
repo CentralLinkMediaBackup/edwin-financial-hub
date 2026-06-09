@@ -56,58 +56,18 @@ export function LoadingSplash({ onComplete }) {
             }}
           />
 
-          {/* EB SVG initials with stroke animation */}
+          {/* Logo */}
           <motion.div
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
             className="mb-8"
           >
-            <svg
-              width="200"
-              height="180"
-              viewBox="0 0 200 180"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              {/* E letter */}
-              <motion.path
-                d="M20 20 L20 160 M20 20 L85 20 M20 88 L75 88 M20 160 L85 160"
-                stroke="#F59E0B"
-                strokeWidth="10"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                fill="none"
-                initial={{ pathLength: 0, opacity: 0 }}
-                animate={{ pathLength: 1, opacity: 1 }}
-                transition={{ duration: 1.2, ease: 'easeInOut', delay: 0.1 }}
-              />
-              {/* B letter */}
-              <motion.path
-                d="M110 20 L110 160 M110 20 L165 20 Q185 20 185 52 Q185 84 155 88 Q185 88 185 124 Q185 160 155 160 L110 160"
-                stroke="#F59E0B"
-                strokeWidth="10"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                fill="none"
-                initial={{ pathLength: 0, opacity: 0 }}
-                animate={{ pathLength: 1, opacity: 1 }}
-                transition={{ duration: 1.2, ease: 'easeInOut', delay: 0.3 }}
-              />
-              {/* Subtle glow */}
-              <motion.circle
-                cx="100"
-                cy="90"
-                r="75"
-                fill="none"
-                stroke="#F59E0B"
-                strokeWidth="1"
-                opacity="0.15"
-                initial={{ scale: 0, opacity: 0 }}
-                animate={{ scale: 1, opacity: 0.15 }}
-                transition={{ duration: 1.0, delay: 0.5 }}
-              />
-            </svg>
+            <img
+              src="/EdwinBernalLogo.png"
+              alt="Edwin Bernal"
+              style={{ width: '180px', height: '180px', objectFit: 'contain' }}
+            />
           </motion.div>
 
           {/* Name letters */}
