@@ -448,6 +448,53 @@ export const useStore = create((set, get) => ({
     get().addToast('Bill deleted', 'success')
   },
 
+  markBillManuallyPaid: (billId) => {
+    const state = get()
+    const bill = state.bills.find(b => b.id === billId)
+    if (!bill || bill.paidThisMonth) return
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const currentMonth = format(new Date(), 'yyyy-MM')
+    const txId = `manual-bill-${billId}-${currentMonth}`
+    const newTx = {
+      id: txId, date: today, type: 'out', amount: bill.amount,
+      category: bill.category || 'Bills', note: bill.name,
+      account: 'chaseDebit', isOneTime: false, source: 'bill-payment',
+      createdAt: new Date().toISOString(),
+    }
+    const newBal = parseFloat(((state.accounts.chaseDebit || 0) - bill.amount).toFixed(2))
+    set(s => ({
+      bills: s.bills.map(b => b.id === billId ? { ...b, paidThisMonth: true } : b),
+      transactions: [newTx, ...s.transactions],
+      accounts: { ...s.accounts, chaseDebit: newBal },
+    }))
+    sbWrite(supabase.from('transactions').insert([txToRow(newTx)]), 'markBillManuallyPaid-tx')
+    sbUpdateBalance('chaseDebit', newBal)
+    sbWrite(supabase.from('bills').update({ paid_this_month: true }).eq('id', billId), 'markBillManuallyPaid')
+    get().addToast(`${bill.name} marked as paid`, 'success')
+  },
+
+  unmarkBillPaid: (billId) => {
+    const state = get()
+    const bill = state.bills.find(b => b.id === billId)
+    if (!bill) return
+    const currentMonth = format(new Date(), 'yyyy-MM')
+    const manualTxId = `manual-bill-${billId}-${currentMonth}`
+    const autoBillTxId = `auto-bill-${billId}-${currentMonth}`
+    const txToRemove = state.transactions.find(t => t.id === manualTxId || t.id === autoBillTxId)
+    const amountToAdd = txToRemove ? txToRemove.amount : bill.amount
+    const newBal = parseFloat(((state.accounts.chaseDebit || 0) + amountToAdd).toFixed(2))
+    set(s => ({
+      bills: s.bills.map(b => b.id === billId ? { ...b, paidThisMonth: false } : b),
+      transactions: s.transactions.filter(t => t.id !== manualTxId && t.id !== autoBillTxId),
+      accounts: { ...s.accounts, chaseDebit: newBal },
+    }))
+    sbWrite(supabase.from('transactions').delete().eq('id', manualTxId), 'unmarkBillPaid-manual')
+    sbWrite(supabase.from('transactions').delete().eq('id', autoBillTxId), 'unmarkBillPaid-auto')
+    sbUpdateBalance('chaseDebit', newBal)
+    sbWrite(supabase.from('bills').update({ paid_this_month: false }).eq('id', billId), 'unmarkBillPaid')
+    get().addToast(`${bill.name} marked as unpaid`, 'success')
+  },
+
   // ── PAYCHECKS ──────────────────────────────────────────────────────────────
   addPaycheck: (paycheck) => {
     const newP = { ...paycheck, id: paycheck.id || generateId() }
@@ -516,6 +563,24 @@ export const useStore = create((set, get) => ({
   deleteEarnInLog: (id) => {
     set(s => ({ earnInLogs: s.earnInLogs.filter(l => l.id !== id) }))
     sbWrite(supabase.from('earnin_logs').delete().eq('id', id), 'deleteEarnInLog')
+  },
+
+  logNewEarnInUsage: (log) => {
+    const state = get()
+    const totalTaken = ['fri', 'sat', 'sun', 'mon'].reduce((sum, day) =>
+      log[`${day}_taken`] ? sum + (log.amounts?.[day] || 0) : sum, 0)
+    const newLog = {
+      ...log, id: generateId(), status: 'active',
+      repaymentAmount: totalTaken, createdAt: new Date().toISOString(),
+    }
+    const newBal = parseFloat(((state.accounts.chaseDebit || 0) + totalTaken).toFixed(2))
+    set(s => ({
+      earnInLogs: [newLog, ...s.earnInLogs],
+      accounts: { ...s.accounts, chaseDebit: newBal },
+    }))
+    sbWrite(supabase.from('earnin_logs').insert([earnInToRow(newLog)]), 'logNewEarnInUsage')
+    sbUpdateBalance('chaseDebit', newBal)
+    get().addToast('Earn In usage logged — balance updated', 'success')
   },
 
   markStepTaken: (logId, step) => {
