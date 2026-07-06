@@ -252,7 +252,7 @@ export const useStore = create((set, get) => ({
   removeToast: (id) => set(s => ({ toasts: s.toasts.filter(t => t.id !== id) })),
 
   // ── Data (empty until initialized from Supabase) ───────────────────────────
-  accounts:      { chaseDebit: 0, capitalOneDebit: 0, cashApp: 0, paypal: 0 },
+  accounts:      { chaseDebit: 0, capitalOneDebit: 0, cashApp: 0, paypal: 0, cash: 0 },
   projectedBalance: null,
   transactions:  [],
   bills:         [],

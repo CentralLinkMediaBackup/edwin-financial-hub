@@ -6,7 +6,8 @@ import {
 import {
   Plus, Search, Download, Pencil, Trash2,
   Check, X, Utensils, CreditCard, Car, ShoppingCart,
-  HeartPulse, MoreHorizontal, FileText, Clock, ChevronDown
+  HeartPulse, MoreHorizontal, FileText, Clock, ChevronDown,
+  ShoppingBag, RefreshCw, Briefcase, ArrowLeftRight, Banknote, PawPrint
 } from 'lucide-react'
 import { format, parseISO, startOfMonth, endOfMonth, isAfter, isBefore } from 'date-fns'
 import { Modal } from '../components/ui/Modal'
@@ -14,28 +15,41 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { useStore } from '../store/useStore'
 import { formatCurrency, formatDateInput } from '../lib/formatters'
 
-const CATEGORIES = ['Food', 'Bills', 'Transport', 'Entertainment', 'Health', 'Other']
+const CATEGORIES = ['Food', 'Bills', 'Transport', 'Entertainment', 'Health', 'Pet', 'Shopping', 'Subscriptions', 'Business', 'Transfer', 'Cash', 'Other']
 const ACCOUNTS = [
   { value: 'chaseDebit', label: 'Chase DC' },
   { value: 'capitalOneDebit', label: 'Capital One DC' },
   { value: 'cashApp', label: 'Cash App DC' },
   { value: 'paypal', label: 'PayPal DC' },
+  { value: 'cash', label: 'Cash (Wallet)' },
 ]
 const CATEGORY_COLORS = {
-  Food: '#F59E0B',
-  Bills: '#3B82F6',
-  Transport: '#8B5CF6',
+  Food:          '#F59E0B',
+  Bills:         '#3B82F6',
+  Transport:     '#8B5CF6',
   Entertainment: '#EC4899',
-  Health: '#10B981',
-  Other: '#64748B',
+  Health:        '#10B981',
+  Pet:           '#F472B6',
+  Shopping:      '#6366F1',
+  Subscriptions: '#06B6D4',
+  Business:      '#1D4ED8',
+  Transfer:      '#94A3B8',
+  Cash:          '#78716C',
+  Other:         '#64748B',
 }
 const CATEGORY_ICONS = {
-  Food: Utensils,
-  Bills: CreditCard,
-  Transport: Car,
+  Food:          Utensils,
+  Bills:         CreditCard,
+  Transport:     Car,
   Entertainment: ShoppingCart,
-  Health: HeartPulse,
-  Other: MoreHorizontal,
+  Health:        HeartPulse,
+  Pet:           PawPrint,
+  Shopping:      ShoppingBag,
+  Subscriptions: RefreshCw,
+  Business:      Briefcase,
+  Transfer:      ArrowLeftRight,
+  Cash:          Banknote,
+  Other:         MoreHorizontal,
 }
 
 const emptyForm = {

@@ -10,7 +10,9 @@ import {
   isAfter, isBefore, isSameDay as isSame
 } from 'date-fns'
 import { useStore } from '../store/useStore'
+import { useNavigate } from 'react-router-dom'
 import { formatCurrency } from '../lib/formatters'
+import { WEEK_MEAL_PLAN } from './Cooking'
 
 // ── Build calendar events from all stores ─────────────────────────────────────
 function useCalendarEvents(bills, paychecks, tiltLogs, afterpayItems, transactions, month) {
@@ -200,6 +202,22 @@ function EventPill({ ev }) {
   )
 }
 
+// ── Dinner pill ───────────────────────────────────────────────────────────────
+function DinnerPill({ day, onNavigate }) {
+  const meal = WEEK_MEAL_PLAN[day.getDay()]
+  if (!meal) return null
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); onNavigate() }}
+      title={meal.title}
+      style={{ display:'flex', alignItems:'center', gap:2, background:'rgba(245,158,11,0.18)', border:'1px solid rgba(245,158,11,0.35)', borderRadius:99, padding:'1px 5px', cursor:'pointer', marginTop:2, width:'fit-content' }}
+    >
+      <span style={{ fontSize:10 }}>{meal.emoji}</span>
+      {meal.eatOut && <span style={{ fontSize:8, color:'#f59e0b', fontWeight:600 }}>Eat Out</span>}
+    </div>
+  )
+}
+
 // ── Calendar Page ─────────────────────────────────────────────────────────────
 export default function Calendar() {
   const bills = useStore(s => s.bills)
@@ -208,6 +226,7 @@ export default function Calendar() {
   const afterpayItems = useStore(s => s.afterpayItems)
   const transactions = useStore(s => s.transactions)
 
+  const navigate = useNavigate()
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [selectedDay, setSelectedDay] = useState(null)
   const [slideDir, setSlideDir] = useState(1)
@@ -288,6 +307,7 @@ export default function Calendar() {
             { label: 'TILT/Earn In', color: '#F59E0B' },
             { label: 'Afterpay', color: '#3B82F6' },
             { label: 'Transaction', color: '#64748B' },
+          { label: 'Dinner 🍳', color: '#F59E0B' },
           ].map(l => (
             <span key={l.label} className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: l.color }} />
@@ -352,6 +372,7 @@ export default function Calendar() {
                     {evs.length > maxPills && (
                       <span className="text-[9px] text-slate-500 pl-1">+{evs.length - maxPills} more</span>
                     )}
+                    {isCurrentMonth && <DinnerPill day={day} onNavigate={() => navigate('/cooking')} />}
                   </div>
                 </button>
               )

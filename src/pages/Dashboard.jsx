@@ -1,23 +1,25 @@
-import { useMemo, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
-import { Link } from 'react-router-dom'
+import { useMemo, useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
+import { Link, useNavigate } from 'react-router-dom'
 import {
-  Wallet, CalendarDays, TrendingUp, TrendingDown, AlertTriangle,
+  Wallet, CalendarDays, TrendingUp, AlertTriangle,
   ArrowRight, Zap, CheckCircle2, Circle, DollarSign,
-  Utensils, Car, HeartPulse, MoreHorizontal, ShoppingCart, CreditCard,
-  ReceiptText, Clock, ChevronRight, ChevronDown, ChevronUp
+  Target, CheckSquare, Dumbbell, Plus, ChevronRight,
+  Flame, Activity, Receipt, BarChart2, CreditCard
 } from 'lucide-react'
 import {
   format, parseISO, isAfter, isBefore, addDays,
-  startOfMonth, endOfMonth, isToday, differenceInDays, isSameMonth
+  endOfMonth, differenceInDays, isSameMonth
 } from 'date-fns'
 import { useStore } from '../store/useStore'
+import { WEEK_MEAL_PLAN } from './Cooking'
 import { useAnimatedCounter } from '../hooks/useAnimatedCounter'
 import { formatCurrency, formatDate } from '../lib/formatters'
+import { supabase } from '../lib/supabase'
+import { LineChart, Line, ResponsiveContainer, Tooltip } from 'recharts'
 
-// ── Animated currency ─────────────────────────────────────────────────────────
-function AnimatedCurrency({ value, className = '', duration = 1500 }) {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function AnimatedCurrency({ value, className = '', duration = 1200 }) {
   const animated = useAnimatedCounter(Math.abs(value), duration)
   const sign = value < 0 ? '-' : ''
   return (
@@ -27,110 +29,6 @@ function AnimatedCurrency({ value, className = '', duration = 1500 }) {
   )
 }
 
-// ── Category config ───────────────────────────────────────────────────────────
-const categoryConfig = {
-  Food:          { icon: Utensils,      color: '#F59E0B' },
-  Bills:         { icon: CreditCard,    color: '#3B82F6' },
-  Transport:     { icon: Car,           color: '#8B5CF6' },
-  Entertainment: { icon: ShoppingCart,  color: '#EC4899' },
-  Health:        { icon: HeartPulse,    color: '#10B981' },
-  Other:         { icon: MoreHorizontal, color: '#64748B' },
-}
-const PIE_COLORS = ['#F59E0B', '#3B82F6', '#8B5CF6', '#EC4899', '#10B981', '#64748B']
-
-// ── Stagger animation ─────────────────────────────────────────────────────────
-const card = { hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0, transition: { duration: 0.35 } } }
-const container = { hidden: {}, show: { transition: { staggerChildren: 0.07 } } }
-
-// ── TILT mini arc ─────────────────────────────────────────────────────────────
-function TiltMiniArc({ used, max }) {
-  const pct = max > 0 ? Math.min(1, used / max) : 0
-  const r = 44, sw = 8
-  const circ = 2 * Math.PI * r
-  const arc = circ * 0.75
-  const fill = pct * arc
-
-  const strokeColor = pct >= 1 ? '#EF4444' : pct >= 0.75 ? '#F59E0B' : '#10B981'
-
-  return (
-    <svg width="110" height="78" viewBox="0 0 110 78">
-      <circle cx="55" cy="65" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={sw}
-        strokeDasharray={`${arc} ${circ}`} strokeDashoffset="0"
-        strokeLinecap="round" transform="rotate(-135 55 65)"
-      />
-      <motion.circle
-        cx="55" cy="65" r={r} fill="none" stroke={strokeColor} strokeWidth={sw}
-        strokeDasharray={`${circ}`} strokeLinecap="round"
-        transform="rotate(-135 55 65)"
-        initial={{ strokeDashoffset: arc }}
-        animate={{ strokeDashoffset: arc - fill }}
-        transition={{ duration: 1.2, ease: 'easeOut', delay: 0.3 }}
-      />
-      <text x="55" y="56" textAnchor="middle" fill="white" fontSize="15" fontWeight="700" fontFamily="'Sora',sans-serif">
-        ${used}
-      </text>
-      <text x="55" y="70" textAnchor="middle" fill="#94A3B8" fontSize="10">
-        of ${max}
-      </text>
-    </svg>
-  )
-}
-
-// ── Mini Calendar ─────────────────────────────────────────────────────────────
-function MiniCalendar({ events }) {
-  const today = new Date()
-  const start = startOfMonth(today)
-  const end = endOfMonth(today)
-  const daysInMonth = end.getDate()
-  const startDow = start.getDay()
-
-  const eventsByDay = useMemo(() => {
-    const map = {}
-    events.forEach(ev => {
-      if (!map[ev.day]) map[ev.day] = []
-      map[ev.day].push(ev)
-    })
-    return map
-  }, [events])
-
-  const cells = []
-  for (let i = 0; i < startDow; i++) cells.push(null)
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
-
-  return (
-    <div>
-      <div className="grid grid-cols-7 gap-0.5 mb-1">
-        {['Su','Mo','Tu','We','Th','Fr','Sa'].map((d, i) => (
-          <div key={i} className="text-[9px] text-slate-500 font-medium text-center py-0.5">{d}</div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-0.5">
-        {cells.map((day, i) => {
-          if (!day) return <div key={`e-${i}`} />
-          const isT = day === today.getDate()
-          const evs = eventsByDay[day] || []
-          const hasIncome = evs.some(e => e.type === 'income')
-          const hasBill = evs.some(e => e.type === 'bill')
-          const hasOther = evs.some(e => e.type === 'other')
-          return (
-            <div key={day} className={`rounded-md flex flex-col items-center py-1 ${
-              isT ? 'bg-amber-500/20' : 'hover:bg-white/5'
-            }`}>
-              <span className={`text-[10px] font-medium leading-none ${isT ? 'text-amber-400' : 'text-slate-400'}`}>{day}</span>
-              <div className="flex gap-0.5 mt-0.5">
-                {hasIncome && <div className="w-1 h-1 rounded-full bg-emerald-400" />}
-                {hasBill && <div className="w-1 h-1 rounded-full bg-red-400" />}
-                {hasOther && <div className="w-1 h-1 rounded-full bg-amber-400" />}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── Greeting helper ───────────────────────────────────────────────────────────
 function greeting() {
   const h = new Date().getHours()
   if (h < 12) return 'Good morning'
@@ -138,241 +36,267 @@ function greeting() {
   return 'Good evening'
 }
 
+const card = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
+const container = { hidden: {}, show: { transition: { staggerChildren: 0.06 } } }
+
+// ── Card wrapper ──────────────────────────────────────────────────────────────
+function Card({ children, className = '', style = {} }) {
+  return (
+    <div
+      className={`bg-white rounded-xl border p-5 ${className}`}
+      style={{ borderColor: '#e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', ...style }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function CardHeader({ icon: Icon, iconBg, iconColor, title, linkTo, linkLabel }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: iconBg }}>
+          <Icon size={15} style={{ color: iconColor }} />
+        </div>
+        <span className="text-sm font-semibold" style={{ color: '#374151' }}>{title}</span>
+      </div>
+      {linkTo && (
+        <Link to={linkTo} className="text-xs flex items-center gap-1 font-medium hover:opacity-70 transition-opacity" style={{ color: '#d97706' }}>
+          {linkLabel || 'View all'} <ArrowRight size={12} />
+        </Link>
+      )}
+    </div>
+  )
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
-  const accounts         = useStore(s => s.accounts)
-  const transactions     = useStore(s => s.transactions)
-  const bills            = useStore(s => s.bills)
-  const paychecks        = useStore(s => s.paychecks)
-  const tiltLogs         = useStore(s => s.tiltLogs)
-  const earnInLogs       = useStore(s => s.earnInLogs)
-  const afterpayItems    = useStore(s => s.afterpayItems)
-  const projectedBalance = useStore(s => s.projectedBalance)
-  const theme            = useStore(s => s.theme)
+  const accounts      = useStore(s => s.accounts)
+  const transactions  = useStore(s => s.transactions)
+  const bills         = useStore(s => s.bills)
+  const paychecks     = useStore(s => s.paychecks)
+  const tiltLogs      = useStore(s => s.tiltLogs)
+  const earnInLogs    = useStore(s => s.earnInLogs)
+  const settings      = useStore(s => s.settings)
+  const navigate      = useNavigate()
 
-  const [expandedCategory, setExpandedCategory] = useState(null)
-  const [expandedMonthSection, setExpandedMonthSection] = useState(null)
+  const [goals,    setGoals]    = useState([])
+  const [habits,   setHabits]   = useState([])
+  const [habitLogs, setHabitLogs] = useState([])
+  const [workouts, setWorkouts] = useState([])
 
   const today = new Date()
+  const todayStr = format(today, 'yyyy-MM-dd')
 
-  const totalBalance = Object.values(accounts).reduce((a, b) => a + b, 0)
+  // Load new Supabase tables
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [g, h, hl, w] = await Promise.all([
+          supabase.from('goals').select('*').eq('status', 'active').limit(5),
+          supabase.from('habits').select('*').limit(10),
+          supabase.from('habit_logs').select('*').gte('date', format(addDays(today, -7), 'yyyy-MM-dd')),
+          supabase.from('workouts').select('*').order('date', { ascending: false }).limit(7),
+        ])
+        if (g.data) setGoals(g.data)
+        if (h.data) setHabits(h.data)
+        if (hl.data) setHabitLogs(hl.data)
+        if (w.data) setWorkouts(w.data)
+      } catch (_) {}
+    }
+    load()
+  }, [])
 
-  // Next paycheck
+  const totalBalance     = Object.values(accounts).reduce((a, b) => a + b, 0)
+  const chaseBalance     = accounts.chaseDebit || 0
+  const cashBalance      = accounts.cash || 0
+  const spendableBalance = chaseBalance + cashBalance
+
   const nextPaycheck = useMemo(() =>
     paychecks
       .filter(p => !p.received && isAfter(parseISO(p.date), today))
       .sort((a, b) => new Date(a.date) - new Date(b.date))[0] || null
   , [paychecks])
 
-  // Monthly stats
-  const monthlyStats = useMemo(() => {
-    const monthTxs = transactions.filter(t => isSameMonth(parseISO(t.date), today))
-    const income   = monthTxs.filter(t => t.type === 'in').reduce((s, t) => s + t.amount, 0)
-    const outgoing = monthTxs.filter(t => t.type === 'out').reduce((s, t) => s + t.amount, 0)
-    const paycheckIncome = paychecks
-      .filter(p => isSameMonth(parseISO(p.date), today) && p.received)
-      .reduce((s, p) => s + p.amount, 0)
-    return { income: income + paycheckIncome, outgoing, net: income + paycheckIncome - outgoing }
-  }, [transactions, paychecks])
+  const daysUntilPay = nextPaycheck
+    ? differenceInDays(parseISO(nextPaycheck.date), today)
+    : null
 
-  // Projected EOM
-  const projectedEOM = useMemo(() => {
-    const eom = endOfMonth(today)
-    let proj = totalBalance
-    paychecks.forEach(p => {
-      const d = parseISO(p.date)
-      if (!p.received && isAfter(d, today) && isBefore(d, eom)) proj += p.amount
-    })
-    bills.filter(b => b.isActive && b.frequency === 'monthly' && b.dueDay).forEach(b => {
-      const due = new Date(today.getFullYear(), today.getMonth(), b.dueDay)
-      if (isAfter(due, today)) proj -= b.amount
-    })
-    return proj
-  }, [totalBalance, paychecks, bills])
-
-  // Spending by category — deduplicated by Map
-  const spendingByCategory = useMemo(() => {
-    const catMap = new Map()
-    transactions
-      .filter(t => t.type === 'out' && isSameMonth(parseISO(t.date), today))
-      .forEach(t => {
-        const cat = (t.category || 'Other').trim() || 'Other'
-        catMap.set(cat, (catMap.get(cat) || 0) + t.amount)
+  const nextBill = useMemo(() => {
+    const upcoming = bills
+      .filter(b => b.isActive && b.dueDay)
+      .map(b => {
+        const d = new Date(today.getFullYear(), today.getMonth(), b.dueDay)
+        if (d < today) d.setMonth(d.getMonth() + 1)
+        return { ...b, nextDue: d }
       })
-    return Array.from(catMap.entries()).map(([name, value]) => ({ name, value }))
-  }, [transactions])
+      .sort((a, b) => a.nextDue - b.nextDue)
+    return upcoming[0] || null
+  }, [bills])
 
-  // Per-category transaction lists (for tooltip + expansion)
-  const transactionsByCategory = useMemo(() => {
-    const map = {}
-    transactions
-      .filter(t => t.type === 'out' && isSameMonth(parseISO(t.date), today))
-      .forEach(t => {
-        const cat = (t.category || 'Other').trim() || 'Other'
-        if (!map[cat]) map[cat] = []
-        map[cat].push(t)
-      })
-    return map
-  }, [transactions])
-
-  // Income breakdown for "This Month" dropdown
-  const monthIncomeItems = useMemo(() => ({
-    paychecks: paychecks.filter(p => isSameMonth(parseISO(p.date), today) && p.received),
-    transactions: transactions.filter(t => t.type === 'in' && isSameMonth(parseISO(t.date), today)),
-  }), [transactions, paychecks])
-
-  // Outgoing breakdown for "This Month" dropdown (by category)
-  const monthOutgoingItems = useMemo(() => {
-    const byCategory = {}
-    transactions
-      .filter(t => t.type === 'out' && isSameMonth(parseISO(t.date), today))
-      .forEach(t => {
-        const cat = t.category || 'Other'
-        if (!byCategory[cat]) byCategory[cat] = []
-        byCategory[cat].push(t)
-      })
-    return byCategory
-  }, [transactions])
-
-  // Custom donut tooltip — shows individual transactions per category
-  const tooltipBg = theme === 'dark' ? '#1E3A5F' : '#1E293B'
-  const renderPieTooltip = ({ active, payload }) => {
-    if (!active || !payload?.length) return null
-    const catName = payload[0]?.name || ''
-    const total   = payload[0]?.value || 0
-    const txs     = transactionsByCategory[catName] || []
-    return (
-      <div style={{ background: tooltipBg, color: '#FFF', borderRadius: 8, padding: '8px 12px', maxWidth: 220, border: '1px solid rgba(255,255,255,0.2)', fontSize: 11 }}>
-        <p style={{ fontWeight: 700, marginBottom: 4, fontSize: 12 }}>{catName} — {formatCurrency(total)}</p>
-        {txs.slice(0, 6).map(t => (
-          <p key={t.id} style={{ color: '#CBD5E1', margin: '2px 0' }}>
-            {t.note || catName} −{formatCurrency(t.amount)}
-          </p>
-        ))}
-        {txs.length > 6 && <p style={{ color: '#94A3B8', marginTop: 2 }}>+{txs.length - 6} more · click to expand</p>}
-        {txs.length <= 6 && txs.length > 0 && <p style={{ color: '#94A3B8', marginTop: 2 }}>click to expand</p>}
-      </div>
-    )
-  }
-
-  // Upcoming 7 days
-  const upcomingPayments = useMemo(() => {
-    const evs = []
-    const in7 = addDays(today, 7)
-
-    bills.filter(b => b.isActive && b.dueDay).forEach(b => {
-      const d = new Date(today.getFullYear(), today.getMonth(), b.dueDay)
-      if ((isAfter(d, today) || isToday(d)) && isBefore(d, in7))
-        evs.push({ id: b.id, name: b.name, amount: -b.amount, date: d, type: 'bill' })
-    })
-    paychecks.forEach(p => {
-      const d = parseISO(p.date)
-      if ((isAfter(d, today) || isToday(d)) && isBefore(d, in7))
-        evs.push({ id: p.id, name: p.source || 'Paycheck', amount: p.amount, date: d, type: 'income' })
-    })
-    tiltLogs.filter(t => t.status === 'active').forEach(t => {
-      const d = parseISO(t.repaymentDate)
-      if ((isAfter(d, today) || isToday(d)) && isBefore(d, in7))
-        evs.push({ id: t.id, name: 'TILT Repayment', amount: -t.amountUsed, date: d, type: 'tilt' })
-    })
-    afterpayItems.forEach(item =>
-      item.payments.filter(p => p.status !== 'paid').forEach(p => {
-        const d = parseISO(p.dueDate)
-        if ((isAfter(d, today) || isToday(d)) && isBefore(d, in7))
-          evs.push({ id: p.id, name: `Afterpay · ${item.name}`, amount: -p.amount, date: d, type: 'afterpay' })
-      })
-    )
-    return evs.sort((a, b) => a.date - b.date)
-  }, [bills, paychecks, tiltLogs, afterpayItems])
-
-  // Warning days
   const warningDays = useMemo(() => {
-    const w = []; let running = totalBalance
-    for (let i = 1; i <= 14; i++) {
+    let running = totalBalance
+    const warnings = []
+    for (let i = 1; i <= 30; i++) {
       const day = addDays(today, i)
-      bills.filter(b => b.isActive && b.dueDay).forEach(b => {
+      // Monthly bills: dueDay is day-of-month
+      bills.filter(b => b.isActive && b.dueDay && b.frequency !== 'weekly').forEach(b => {
         if (new Date(day.getFullYear(), day.getMonth(), b.dueDay).toDateString() === day.toDateString())
+          running -= b.amount
+      })
+      // Weekly bills: dueDay is JS day-of-week (1=Mon, 2=Tue, …)
+      bills.filter(b => b.isActive && b.dueDay != null && b.frequency === 'weekly').forEach(b => {
+        if (day.getDay() === b.dueDay)
           running -= b.amount
       })
       paychecks.forEach(p => {
         if (parseISO(p.date).toDateString() === day.toDateString() && !p.received)
           running += p.amount
       })
-      if (running < 20) w.push({ date: day, amount: running })
+      if (running < 20) warnings.push({ date: day, amount: running })
     }
-    return w
+    return warnings
   }, [totalBalance, bills, paychecks])
 
-  // Calendar events
-  const calendarEvents = useMemo(() => {
-    const evs = []
-    bills.filter(b => b.isActive && b.dueDay).forEach(b => {
-      if (isSameMonth(new Date(today.getFullYear(), today.getMonth(), b.dueDay), today))
-        evs.push({ day: b.dueDay, type: 'bill', name: b.name })
+  // 30-day balance trend (fake from transactions)
+  const balanceTrend = useMemo(() => {
+    const days = []
+    for (let i = 29; i >= 0; i--) {
+      const d = addDays(today, -i)
+      const dStr = format(d, 'yyyy-MM-dd')
+      const dayTxs = transactions.filter(t => t.date === dStr)
+      const delta = dayTxs.reduce((s, t) => t.type === 'in' ? s + t.amount : s - t.amount, 0)
+      days.push({ date: format(d, 'MMM d'), delta })
+    }
+    let running = totalBalance
+    return days.map((d, i) => {
+      if (i < days.length - 1) running -= d.delta
+      return { ...d, value: Math.max(0, running) }
+    }).reverse().map((d, i, arr) => {
+      let v = totalBalance
+      for (let j = 0; j < i; j++) v -= arr[j].delta
+      return { ...d, value: Math.max(0, v) }
     })
-    paychecks.filter(p => isSameMonth(parseISO(p.date), today)).forEach(p =>
-      evs.push({ day: parseISO(p.date).getDate(), type: 'income', name: 'Paycheck' })
-    )
-    transactions.filter(t => isSameMonth(parseISO(t.date), today)).forEach(t =>
-      evs.push({ day: parseISO(t.date).getDate(), type: 'other', name: t.note || t.category })
-    )
-    return evs
-  }, [bills, paychecks, transactions])
+  }, [transactions, totalBalance])
 
-  const activeTilt  = tiltLogs.find(t => t.status === 'active')
+  // Habit streaks
+  const habitStreaks = useMemo(() => {
+    return habits.slice(0, 3).map(h => {
+      const logs = habitLogs
+        .filter(l => l.habit_id === h.id && l.completed)
+        .map(l => l.date)
+        .sort()
+        .reverse()
+      let streak = 0
+      let checkDate = todayStr
+      for (const logDate of logs) {
+        if (logDate === checkDate) {
+          streak++
+          const d = parseISO(checkDate)
+          checkDate = format(addDays(d, -1), 'yyyy-MM-dd')
+        } else break
+      }
+      const last7 = Array.from({ length: 7 }, (_, i) => {
+        const d = format(addDays(today, -6 + i), 'yyyy-MM-dd')
+        return logs.includes(d)
+      })
+      return { ...h, streak, last7 }
+    })
+  }, [habits, habitLogs, todayStr])
+
+  // Today's goals
+  const todaysGoals = goals.slice(0, 4)
+  const completedGoals = todaysGoals.filter(g => g.progress >= 100).length
+
+  // Weekly workout summary
+  const weekWorkouts = useMemo(() => {
+    const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+    return days.map((label, i) => {
+      const d = format(addDays(today, -(today.getDay() === 0 ? 6 : today.getDay() - 1) + i), 'yyyy-MM-dd')
+      const w = workouts.find(wo => wo.date === d)
+      return { label, workout: w || null, date: d }
+    })
+  }, [workouts, today])
+
+  const latestWorkout = workouts[0] || null
+  const workoutsThisWeek = weekWorkouts.filter(d => d.workout && d.workout.type !== 'Rest').length
+
+  const afterpayItems = useStore(s => s.afterpayItems) || []
+
+  const activeTilt   = tiltLogs.find(t => t.status === 'active')
   const activeEarnIn = earnInLogs.find(l => l.status === 'active') || earnInLogs[0]
-  const recentTxs   = [...transactions]
-    .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
-    .slice(0, 6)
 
-  // Month progress %
-  const daysInMonth  = endOfMonth(today).getDate()
-  const monthProgress = Math.round((today.getDate() / daysInMonth) * 100)
+  // Tonight's dinner
+  const todayMealPlan = WEEK_MEAL_PLAN[today.getDay()]
 
-  const accountItems = [
-    { label: 'Chase',    key: 'chaseDebit' },
-    { label: 'Cap One',  key: 'capitalOneDebit' },
-    { label: 'Cash App', key: 'cashApp' },
-    { label: 'PayPal',   key: 'paypal' },
-  ]
+  // Afterpay — find active plan + next payment
+  const activeAP = afterpayItems[0] || null
+  const nextAP = activeAP
+    ? (activeAP.payments || []).filter(p => p.status !== 'paid').sort((a,b) => a.dueDate.localeCompare(b.dueDate))[0]
+    : null
+  const apPaidCount = activeAP ? (activeAP.payments || []).filter(p => p.status === 'paid').length : 0
+  const apTotalCount = activeAP ? (activeAP.payments || []).length : 0
+
+  const displayName = settings?.general?.displayName || settings?.displayName || 'Zack'
+
+  const typeColors = {
+    Strength: '#10b981',
+    Cardio:   '#2563eb',
+    HIIT:     '#ef4444',
+    Yoga:     '#8b5cf6',
+    Rest:     '#94a3b8',
+  }
 
   return (
-    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
+    <div className="p-5 md:p-7 max-w-[1400px] mx-auto">
 
-      {/* ── Page header ──────────────────────────────────────────────── */}
+      {/* ── Header ──────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-        className="mb-5 flex items-end justify-between"
+        transition={{ duration: 0.3 }}
+        className="mb-6 flex items-start justify-between"
       >
         <div>
-          <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "'Sora', sans-serif" }}>
-            {greeting()}, Zack
+          <h1 className="text-2xl font-bold" style={{ color: '#0f172a', fontFamily: 'Inter, sans-serif' }}>
+            {greeting()}, {displayName}!
           </h1>
-          <p className="text-slate-400 text-sm mt-0.5">{format(today, "EEEE, MMMM d, yyyy")}</p>
+          <p className="text-sm mt-0.5" style={{ color: '#64748b' }}>
+            {format(today, "EEEE, MMMM d, yyyy")}
+          </p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
-          <Clock size={12} />
-          <span>Live balance</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/fitness')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+            style={{ color: '#374151', borderColor: '#e2e8f0' }}
+          >
+            <Activity size={13} /> Log Workout
+          </button>
+          <button
+            onClick={() => navigate('/expenses')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
+            style={{ backgroundColor: '#d97706' }}
+          >
+            <Plus size={13} /> Add Transaction
+          </button>
         </div>
       </motion.div>
 
       {/* ── Warning banner ───────────────────────────────────────────── */}
       {warningDays.length > 0 && (
         <motion.div
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-4 rounded-xl p-3.5 border border-red-500/40 flex items-start gap-3"
-          style={{ background: 'rgba(239,68,68,0.08)', boxShadow: '0 0 20px rgba(239,68,68,0.15)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mb-5 rounded-xl p-3.5 flex items-start gap-3 border"
+          style={{ background: '#fff5f5', borderColor: '#fecaca' }}
         >
-          <AlertTriangle size={17} className="text-red-400 flex-shrink-0 mt-px" />
+          <AlertTriangle size={16} className="flex-shrink-0 mt-px" style={{ color: '#dc2626' }} />
           <div>
-            <p className="text-red-300 font-semibold text-sm">Balance warning in the next 14 days</p>
+            <p className="text-sm font-semibold" style={{ color: '#b91c1c' }}>Balance drops below $20 in the next 14 days</p>
             <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
               {warningDays.slice(0, 3).map((w, i) => (
-                <p key={i} className="text-red-400/80 text-xs">
+                <p key={i} className="text-xs" style={{ color: '#dc2626' }}>
                   {format(w.date, 'EEE MMM d')} → {formatCurrency(w.amount)}
                 </p>
               ))}
@@ -381,650 +305,610 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      <motion.div variants={container} initial="hidden" animate="show" className="space-y-4">
+      {/* ── Main grid ────────────────────────────────────────────────── */}
+      <motion.div variants={container} initial="hidden" animate="show">
+        <div className="grid grid-cols-12 gap-5">
 
-        {/* ══════════════════════════════════════════════════════════════
-            ROW 1 — Balance hero + paycheck + net
-            ══════════════════════════════════════════════════════════════ */}
-        <div className="grid grid-cols-12 gap-4">
+          {/* ─── LEFT/MAIN ─────────────────────────────────────────── */}
+          <div className="col-span-12 xl:col-span-9 space-y-5">
 
-          {/* Balance hero */}
-          <motion.div variants={card} className="col-span-12 lg:col-span-7">
-            <div
-              className="rounded-2xl p-6 h-full border"
-              style={{
-                background: 'linear-gradient(135deg, #0F1629 0%, #141E38 60%, #0D1526 100%)',
-                borderColor: 'rgba(245,158,11,0.18)',
-                boxShadow: '0 0 40px rgba(245,158,11,0.05)',
-              }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center">
-                  <Wallet size={14} className="text-amber-400" />
-                </div>
-                <span className="text-xs text-slate-400 uppercase tracking-widest font-medium">Total Balance</span>
-              </div>
+            {/* Row 1: Finance + Goals */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
-              <AnimatedCurrency
-                value={totalBalance}
-                className="text-5xl font-bold text-white mt-1"
-                duration={1800}
-              />
+              {/* FINANCES CARD */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={Wallet} iconBg="#fef3c7" iconColor="#d97706" title="Finances" linkTo="/finances" linkLabel="Finances" />
 
-              {/* Account pills */}
-              <div className="flex flex-wrap gap-2 mt-4">
-                {accountItems.map(({ label, key }) => {
-                  const bal = accounts[key]
-                  const hasBalance = bal > 0
-                  return (
-                    <div
-                      key={key}
-                      className="flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-xs"
-                      style={{
-                        background: hasBalance ? 'rgba(245,158,11,0.08)' : 'rgba(255,255,255,0.04)',
-                        borderColor: hasBalance ? 'rgba(245,158,11,0.25)' : 'rgba(255,255,255,0.08)',
-                      }}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${hasBalance ? 'bg-amber-400' : 'bg-slate-600'}`} />
-                      <span className="text-slate-400">{label}</span>
-                      <span className={`font-mono font-semibold ${hasBalance ? 'text-white' : 'text-slate-600'}`}>
-                        {formatCurrency(bal)}
+                  <div className="mb-4">
+                    <p className="text-xs font-medium mb-0.5" style={{ color: '#94a3b8' }}>Real Spendable Total</p>
+                    <AnimatedCurrency
+                      value={spendableBalance}
+                      className="text-3xl font-bold"
+                      duration={1200}
+                    />
+                    {/* Chase + Cash breakdown */}
+                    <div className="flex items-center gap-3 mt-2">
+                      <span className="flex items-center gap-1 text-xs" style={{ color: '#64748b' }}>
+                        <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: '#2563eb' }} />
+                        Chase {chaseBalance < 0
+                          ? <span style={{ color: '#dc2626' }}>{formatCurrency(chaseBalance)}</span>
+                          : <span style={{ color: '#374151' }}>{formatCurrency(chaseBalance)}</span>
+                        }
+                      </span>
+                      <span className="text-xs" style={{ color: '#cbd5e1' }}>+</span>
+                      <span className="flex items-center gap-1 text-xs" style={{ color: '#64748b' }}>
+                        <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: '#d97706' }} />
+                        Cash <span style={{ color: '#374151' }}>{formatCurrency(cashBalance)}</span>
                       </span>
                     </div>
-                  )
-                })}
-              </div>
-
-              {/* EOM projection footer */}
-              <div
-                className="mt-4 pt-4 border-t flex items-center justify-between"
-                style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-              >
-                <div>
-                  <p className="text-xs text-slate-500">Projected end of {format(today, 'MMMM')}</p>
-                  <p className={`text-lg font-bold font-mono mt-0.5 ${(projectedBalance ?? projectedEOM) < 0 ? 'text-red-400' : 'text-slate-200'}`}>
-                    {formatCurrency(projectedBalance ?? projectedEOM)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-slate-500">{monthProgress}% through {format(today, 'MMMM')}</p>
-                  <div className="w-32 h-1.5 rounded-full mt-1.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                    <motion.div
-                      className="h-full rounded-full bg-amber-500"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${monthProgress}%` }}
-                      transition={{ duration: 1, ease: 'easeOut', delay: 0.5 }}
-                    />
                   </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
 
-          {/* Paycheck + Net (stacked) */}
-          <div className="col-span-12 lg:col-span-5 grid grid-rows-2 gap-4">
+                  {/* Trend sparkline */}
+                  <div className="h-14 mb-4 -mx-1">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={balanceTrend.slice(-14)}>
+                        <Line type="monotone" dataKey="value" stroke="#d97706" strokeWidth={2} dot={false} />
+                        <Tooltip
+                          content={({ active, payload }) =>
+                            active && payload?.length ? (
+                              <div className="text-xs bg-gray-900 text-white px-2 py-1 rounded shadow">
+                                {formatCurrency(payload[0].value)}
+                              </div>
+                            ) : null
+                          }
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
 
-            {/* Next paycheck */}
-            <motion.div variants={card}>
-              <div className="card-glass p-5 h-full flex items-center gap-4">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.25)' }}
-                >
-                  <DollarSign size={20} className="text-emerald-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Next Paycheck</p>
-                  {nextPaycheck ? (
+                  {/* Info rows */}
+                  <div className="space-y-2">
+                    {nextBill && (
+                      <div className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: '#f1f5f9' }}>
+                        <span className="text-xs" style={{ color: '#64748b' }}>
+                          Next bill: <span style={{ color: '#374151' }} className="font-medium">{nextBill.name}</span>
+                        </span>
+                        <span className="text-xs font-medium" style={{ color: '#dc2626' }}>
+                          -{formatCurrency(nextBill.amount)}
+                        </span>
+                      </div>
+                    )}
+                    {daysUntilPay !== null && (
+                      <div className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: '#f1f5f9' }}>
+                        <span className="text-xs" style={{ color: '#64748b' }}>Next paycheck</span>
+                        <span className="text-xs font-medium" style={{ color: '#059669' }}>
+                          in {daysUntilPay} day{daysUntilPay !== 1 ? 's' : ''} · {formatCurrency(nextPaycheck.amount)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quick links */}
+                  <div className="mt-3 flex gap-2">
+                    <Link
+                      to="/expenses"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+                      style={{ color: '#374151', borderColor: '#e2e8f0' }}
+                    >
+                      <Receipt size={12} /> Transactions →
+                    </Link>
+                    <Link
+                      to="/finances"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+                      style={{ color: '#374151', borderColor: '#e2e8f0' }}
+                    >
+                      <BarChart2 size={12} /> Accounts →
+                    </Link>
+                  </div>
+                </Card>
+              </motion.div>
+
+              {/* TODAY'S GOALS CARD */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={Target} iconBg="#ede9fe" iconColor="#7c3aed" title="Today's Goals" linkTo="/goals" />
+
+                  {todaysGoals.length > 0 ? (
                     <>
-                      <p className="text-2xl font-bold font-mono text-emerald-400">
-                        <AnimatedCurrency value={nextPaycheck.amount} className="text-2xl font-bold font-mono text-emerald-400" duration={1200} />
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5 truncate">{formatDate(nextPaycheck.date)}</p>
+                      {/* Progress bar */}
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs" style={{ color: '#64748b' }}>
+                            {completedGoals} of {todaysGoals.length} complete
+                          </span>
+                          <span className="text-xs font-semibold" style={{ color: '#7c3aed' }}>
+                            {Math.round((completedGoals / todaysGoals.length) * 100)}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full" style={{ backgroundColor: '#f1f5f9' }}>
+                          <motion.div
+                            className="h-full rounded-full"
+                            style={{ backgroundColor: '#7c3aed' }}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.round((completedGoals / todaysGoals.length) * 100)}%` }}
+                            transition={{ duration: 0.8, delay: 0.3 }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        {todaysGoals.map(g => (
+                          <div key={g.id} className="flex items-center gap-2.5">
+                            <div
+                              className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+                              style={{
+                                backgroundColor: g.progress >= 100 ? '#ede9fe' : '#f8fafc',
+                                border: `1.5px solid ${g.progress >= 100 ? '#7c3aed' : '#e2e8f0'}`,
+                              }}
+                            >
+                              {g.progress >= 100 && <CheckCircle2 size={10} style={{ color: '#7c3aed' }} />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm truncate" style={{ color: g.progress >= 100 ? '#94a3b8' : '#374151', textDecoration: g.progress >= 100 ? 'line-through' : 'none' }}>
+                                {g.title}
+                              </p>
+                              <div className="h-1 rounded-full mt-1" style={{ backgroundColor: '#f1f5f9' }}>
+                                <div className="h-full rounded-full" style={{ width: `${g.progress}%`, backgroundColor: '#7c3aed', opacity: 0.6 }} />
+                              </div>
+                            </div>
+                            <span className="text-xs flex-shrink-0" style={{ color: '#94a3b8' }}>{g.progress}%</span>
+                          </div>
+                        ))}
+                      </div>
                     </>
                   ) : (
-                    <p className="text-slate-500 text-sm">None scheduled</p>
+                    <div className="py-8 text-center">
+                      <Target size={28} className="mx-auto mb-2 opacity-20" style={{ color: '#94a3b8' }} />
+                      <p className="text-sm" style={{ color: '#94a3b8' }}>No active goals yet</p>
+                      <Link
+                        to="/goals"
+                        className="inline-flex items-center gap-1 mt-2 text-xs font-medium"
+                        style={{ color: '#7c3aed' }}
+                      >
+                        <Plus size={12} /> Add a goal
+                      </Link>
+                    </div>
                   )}
-                </div>
-                {nextPaycheck && (
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-2xl font-bold text-white">{differenceInDays(parseISO(nextPaycheck.date), today)}</p>
-                    <p className="text-[10px] text-slate-500">days away</p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
 
-            {/* Net this month */}
-            <motion.div variants={card}>
-              <div
-                className="card-glass p-5 h-full"
-                style={monthlyStats.net < 0 ? { boxShadow: '0 0 20px rgba(239,68,68,0.25)' } : {}}
-              >
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-3">This Month</p>
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    {/* Income row — clickable */}
-                    <button
-                      onClick={() => setExpandedMonthSection(s => s === 'income' ? null : 'income')}
-                      className="w-full flex justify-between text-xs mb-1 hover:opacity-80 transition-opacity"
+                  <div className="mt-4 pt-3 border-t" style={{ borderColor: '#f1f5f9' }}>
+                    <Link
+                      to="/goals"
+                      className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+                      style={{ color: '#374151', borderColor: '#e2e8f0' }}
                     >
-                      <span className="text-slate-400 flex items-center gap-1">
-                        Income
-                        {expandedMonthSection === 'income' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                      </span>
-                      <span className="text-emerald-400 font-mono">+{formatCurrency(monthlyStats.income)}</span>
-                    </button>
-                    <div className="h-1.5 rounded-full bg-white/5 mb-1">
-                      <motion.div
-                        className="h-full rounded-full bg-emerald-500"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${Math.min(100, monthlyStats.income / Math.max(monthlyStats.income, monthlyStats.outgoing, 1) * 100)}%` }}
-                        transition={{ duration: 1, ease: 'easeOut', delay: 0.5 }}
-                      />
-                    </div>
-                    {/* Income breakdown dropdown */}
-                    <AnimatePresence>
-                      {expandedMonthSection === 'income' && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.22 }}
-                          className="overflow-hidden mb-1.5"
-                        >
-                          <div className="mt-1 mb-1 p-2 rounded-lg text-[10px] space-y-0.5" style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.15)' }}>
-                            {monthIncomeItems.paychecks.map(p => (
-                              <div key={p.id} className="flex justify-between text-slate-300">
-                                <span>{format(parseISO(p.date), 'MMM d')} · {p.source || 'Paycheck'}</span>
-                                <span className="text-emerald-400 font-mono">+{formatCurrency(p.amount)}</span>
-                              </div>
-                            ))}
-                            {monthIncomeItems.transactions.map(t => (
-                              <div key={t.id} className="flex justify-between text-slate-300">
-                                <span>{format(parseISO(t.date), 'MMM d')} · {t.note || t.category}</span>
-                                <span className="text-emerald-400 font-mono">+{formatCurrency(t.amount)}</span>
-                              </div>
-                            ))}
-                            {monthIncomeItems.paychecks.length === 0 && monthIncomeItems.transactions.length === 0 && (
-                              <p className="text-slate-500">No income logged this month</p>
-                            )}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    {/* Outgoing row — clickable */}
-                    <button
-                      onClick={() => setExpandedMonthSection(s => s === 'outgoing' ? null : 'outgoing')}
-                      className="w-full flex justify-between text-xs mb-1 hover:opacity-80 transition-opacity"
-                    >
-                      <span className="text-slate-400 flex items-center gap-1">
-                        Outgoing
-                        {expandedMonthSection === 'outgoing' ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                      </span>
-                      <span className="text-red-400 font-mono">-{formatCurrency(monthlyStats.outgoing)}</span>
-                    </button>
-                    <div className="h-1.5 rounded-full bg-white/5">
-                      <motion.div
-                        className="h-full rounded-full bg-red-500"
-                        initial={{ width: 0 }}
-                        animate={{ width: `${Math.min(100, monthlyStats.outgoing / Math.max(monthlyStats.income, monthlyStats.outgoing, 1) * 100)}%` }}
-                        transition={{ duration: 1, ease: 'easeOut', delay: 0.6 }}
-                      />
-                    </div>
-                    {/* Outgoing breakdown dropdown */}
-                    <AnimatePresence>
-                      {expandedMonthSection === 'outgoing' && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.22 }}
-                          className="overflow-hidden mt-1"
-                        >
-                          <div className="p-2 rounded-lg text-[10px] space-y-1" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}>
-                            {Object.entries(monthOutgoingItems).sort((a,b) => b[1].reduce((s,t)=>s+t.amount,0) - a[1].reduce((s,t)=>s+t.amount,0)).map(([cat, txs]) => (
-                              <div key={cat}>
-                                <div className="flex justify-between text-slate-400 font-semibold mb-0.5">
-                                  <span>{cat}</span>
-                                  <span className="text-red-400 font-mono">-{formatCurrency(txs.reduce((s,t)=>s+t.amount,0))}</span>
-                                </div>
-                                {txs.slice(0, 4).map(t => (
-                                  <div key={t.id} className="flex justify-between pl-2 text-slate-500">
-                                    <span>{format(parseISO(t.date), 'MMM d')} · {t.note || cat}</span>
-                                    <span className="font-mono">-{formatCurrency(t.amount)}</span>
-                                  </div>
-                                ))}
-                                {txs.length > 4 && <p className="pl-2 text-slate-600">+{txs.length - 4} more</p>}
-                              </div>
-                            ))}
-                            {Object.keys(monthOutgoingItems).length === 0 && (
-                              <p className="text-slate-500">No expenses logged this month</p>
-                            )}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                      <Plus size={12} /> Add Goal
+                    </Link>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-[10px] text-slate-500 mb-0.5">Net</p>
-                    <AnimatedCurrency
-                      value={monthlyStats.net}
-                      className={`text-xl font-bold font-mono ${monthlyStats.net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
-                      duration={1000}
-                    />
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════
-            ROW 2 — TILT | Earn In | Upcoming payments
-            ══════════════════════════════════════════════════════════════ */}
-        <div className="grid grid-cols-12 gap-4">
-
-          {/* TILT */}
-          <motion.div variants={card} className="col-span-12 sm:col-span-6 lg:col-span-4">
-            <div className="card-glass p-5 h-full">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center">
-                  <Zap size={14} className="text-amber-400" />
-                </div>
-                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">TILT Credit</span>
-                <span className={`ml-auto px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                  activeTilt ? 'bg-red-500/20 text-red-400 border border-red-500/25' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/25'
-                }`}>
-                  {activeTilt ? 'Active' : 'Clear'}
-                </span>
-              </div>
-
-              {activeTilt ? (
-                <div className="flex items-center gap-4">
-                  <TiltMiniArc used={activeTilt.amountUsed} max={activeTilt.creditLimit || 400} />
-                  <div className="flex-1 space-y-2">
-                    <div>
-                      <p className="text-[10px] text-slate-500">Repayment due</p>
-                      <p className="text-sm font-semibold text-white mt-0.5">
-                        {format(parseISO(activeTilt.repaymentDate), 'EEE, MMM d')}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-slate-500">Days remaining</p>
-                      <p className={`text-lg font-bold font-mono mt-0.5 ${
-                        differenceInDays(parseISO(activeTilt.repaymentDate), today) <= 2 ? 'text-red-400' : 'text-amber-400'
-                      }`}>
-                        {Math.max(0, differenceInDays(parseISO(activeTilt.repaymentDate), today))}d
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-slate-500">Amount owed</p>
-                      <p className="text-sm font-bold font-mono text-white mt-0.5">{formatCurrency(activeTilt.amountUsed)}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 gap-2">
-                  <div className="w-12 h-12 rounded-full bg-emerald-500/15 flex items-center justify-center">
-                    <Zap size={20} className="text-emerald-400" />
-                  </div>
-                  <p className="text-sm text-slate-400">No active advance</p>
-                  <Link to="/tilt" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">
-                    Take advance <ChevronRight size={11} />
-                  </Link>
-                </div>
-              )}
-
-              <Link to="/tilt" className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-500 hover:text-amber-400 transition-colors">
-                <span>TILT details</span>
-                <ChevronRight size={12} />
-              </Link>
+                </Card>
+              </motion.div>
             </div>
-          </motion.div>
 
-          {/* Earn In */}
-          <motion.div variants={card} className="col-span-12 sm:col-span-6 lg:col-span-4">
-            <div className="card-glass p-5 h-full">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center">
-                  <TrendingUp size={14} className="text-emerald-400" />
-                </div>
-                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Earn In</span>
-                {activeEarnIn && (
-                  <span className="ml-auto text-[10px] text-slate-500">
-                    Cycle: {format(parseISO(activeEarnIn.cycleStartDate), 'MMM d')}
-                  </span>
-                )}
-              </div>
+            {/* Row 2: Habits + Fitness */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
-              {activeEarnIn ? (
-                <>
-                  {/* 4-step tracker */}
-                  <div className="relative mb-3">
-                    <div className="absolute top-4 left-[12%] right-[12%] h-0.5 bg-white/8" />
-                    <motion.div
-                      className="absolute top-4 left-[12%] h-0.5 bg-emerald-500/50"
-                      initial={{ width: 0 }}
-                      animate={{
-                        width: (() => {
-                          const taken = ['fri','sat','sun','mon'].filter(d => activeEarnIn[`${d}_taken`]).length
-                          if (!taken) return '0%'
-                          return `${((taken - 1) / 3) * 76}%`
-                        })()
-                      }}
-                      transition={{ duration: 0.8, ease: 'easeOut' }}
-                    />
-                    <div className="relative z-10 grid grid-cols-4 gap-1">
-                      {['fri','sat','sun','mon'].map((day, i) => {
-                        const taken = activeEarnIn[`${day}_taken`]
-                        const amounts = { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 }
-                        const amt = activeEarnIn.amounts?.[day] || amounts[day]
-                        return (
-                          <div key={day} className="flex flex-col items-center gap-1">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center border ${
-                              taken
-                                ? 'bg-emerald-500/25 border-emerald-500/50'
-                                : 'bg-white/5 border-white/10'
-                            }`}>
-                              {taken
-                                ? <CheckCircle2 size={14} className="text-emerald-400" />
-                                : <Circle size={14} className="text-slate-600" />
-                              }
+              {/* HABIT STREAKS CARD */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={CheckSquare} iconBg="#dcfce7" iconColor="#16a34a" title="Habit Streaks" linkTo="/habits" />
+
+                  {habitStreaks.length > 0 ? (
+                    <>
+                      <div className="space-y-4">
+                        {habitStreaks.map(h => (
+                          <div key={h.id}>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: h.color || '#16a34a' }}
+                                />
+                                <span className="text-sm font-medium" style={{ color: '#374151' }}>{h.name}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Flame size={12} style={{ color: '#d97706' }} />
+                                <span className="text-xs font-bold" style={{ color: '#d97706' }}>{h.streak}</span>
+                              </div>
                             </div>
-                            <span className="text-[9px] text-slate-500 uppercase font-medium">{day}</span>
-                            <span className="text-[9px] font-mono text-slate-400">${amt}</span>
+                            {/* 7-day dot grid */}
+                            <div className="flex gap-1">
+                              {h.last7.map((done, i) => (
+                                <div
+                                  key={i}
+                                  className="flex-1 h-2.5 rounded-sm"
+                                  style={{
+                                    backgroundColor: done
+                                      ? (h.color || '#16a34a')
+                                      : '#f1f5f9',
+                                    opacity: done ? 1 : 1,
+                                  }}
+                                />
+                              ))}
+                            </div>
+                            <div className="flex justify-between mt-0.5">
+                              {['M','T','W','T','F','S','S'].map((d, i) => (
+                                <span key={i} className="flex-1 text-center" style={{ fontSize: '9px', color: '#cbd5e1' }}>{d}</span>
+                              ))}
+                            </div>
                           </div>
-                        )
-                      })}
+                        ))}
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t flex items-center justify-between" style={{ borderColor: '#f1f5f9' }}>
+                        <span className="text-xs" style={{ color: '#94a3b8' }}>
+                          Total active: {habits.length} habit{habits.length !== 1 ? 's' : ''}
+                        </span>
+                        <Link to="/habits" className="text-xs font-medium" style={{ color: '#16a34a' }}>
+                          View all →
+                        </Link>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="py-8 text-center">
+                      <CheckSquare size={28} className="mx-auto mb-2 opacity-20" style={{ color: '#94a3b8' }} />
+                      <p className="text-sm" style={{ color: '#94a3b8' }}>No habits tracked yet</p>
+                      <Link
+                        to="/habits"
+                        className="inline-flex items-center gap-1 mt-2 text-xs font-medium"
+                        style={{ color: '#16a34a' }}
+                      >
+                        <Plus size={12} /> Add a habit
+                      </Link>
                     </div>
-                  </div>
+                  )}
+                </Card>
+              </motion.div>
 
-                  {/* Totals */}
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5">
-                    <div>
-                      <p className="text-[10px] text-slate-500">Taken so far</p>
-                      <p className="text-sm font-bold font-mono text-emerald-400 mt-0.5">
-                        {formatCurrency(['fri','sat','sun','mon'].reduce((sum, d) => {
-                          const amounts = { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 }
-                          return activeEarnIn[`${d}_taken`] ? sum + (activeEarnIn.amounts?.[d] || amounts[d]) : sum
-                        }, 0))}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-slate-500">Repayment</p>
-                      <p className="text-sm font-bold font-mono text-red-400 mt-0.5">
-                        -{formatCurrency(activeEarnIn.repaymentAmount || 521.96)}
-                      </p>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 text-slate-500 gap-1">
-                  <TrendingUp size={22} className="opacity-30" />
-                  <p className="text-sm">No active cycle</p>
-                </div>
-              )}
+              {/* GYM & FITNESS CARD */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={Dumbbell} iconBg="#fee2e2" iconColor="#dc2626" title="Gym & Fitness" linkTo="/fitness" />
 
-              <Link to="/earnin" className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-500 hover:text-amber-400 transition-colors">
-                <span>Earn In details</span>
-                <ChevronRight size={12} />
-              </Link>
-            </div>
-          </motion.div>
-
-          {/* Upcoming 7 days */}
-          <motion.div variants={card} className="col-span-12 lg:col-span-4">
-            <div className="card-glass p-5 h-full">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-7 h-7 rounded-lg bg-blue-500/15 flex items-center justify-center">
-                  <CalendarDays size={14} className="text-blue-400" />
-                </div>
-                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Next 7 Days</span>
-              </div>
-
-              {upcomingPayments.length > 0 ? (
-                <div className="space-y-1.5">
-                  {upcomingPayments.slice(0, 5).map(ev => {
-                    const typeStyles = {
-                      income:   { dot: 'bg-emerald-400', text: 'text-emerald-400' },
-                      bill:     { dot: 'bg-red-400',     text: 'text-red-400' },
-                      tilt:     { dot: 'bg-amber-400',   text: 'text-amber-400' },
-                      afterpay: { dot: 'bg-blue-400',    text: 'text-blue-400' },
-                    }
-                    const s = typeStyles[ev.type] || { dot: 'bg-slate-400', text: 'text-slate-300' }
-                    return (
-                      <div key={ev.id} className="flex items-center gap-2.5 py-1.5 border-b border-white/5 last:border-0">
-                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-slate-200 truncate">{ev.name}</p>
-                          <p className="text-[10px] text-slate-500">{format(ev.date, 'EEE, MMM d')}</p>
+                  <div className="mb-4">
+                    {latestWorkout ? (
+                      <>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span
+                            className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            style={{
+                              backgroundColor: `${typeColors[latestWorkout.type] || '#94a3b8'}18`,
+                              color: typeColors[latestWorkout.type] || '#94a3b8',
+                            }}
+                          >
+                            {latestWorkout.type || 'Workout'}
+                          </span>
+                          <span className="text-xs" style={{ color: '#94a3b8' }}>
+                            {latestWorkout.date === todayStr ? 'Today' : format(parseISO(latestWorkout.date), 'MMM d')}
+                          </span>
                         </div>
-                        <span className={`text-xs font-mono font-semibold flex-shrink-0 ${s.text}`}>
+                        <p className="text-sm" style={{ color: '#374151' }}>
+                          {latestWorkout.notes || `${latestWorkout.duration_minutes || '--'} min workout`}
+                        </p>
+                        {latestWorkout.exercises?.length > 0 && (
+                          <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
+                            {latestWorkout.exercises.length} exercise{latestWorkout.exercises.length !== 1 ? 's' : ''} logged
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-sm" style={{ color: '#94a3b8' }}>No workouts logged yet</p>
+                    )}
+                  </div>
+
+                  {/* Weekly activity bar */}
+                  <div className="mb-4">
+                    <p className="text-xs mb-2 font-medium" style={{ color: '#64748b' }}>
+                      This week — {workoutsThisWeek}/7 days active
+                    </p>
+                    <div className="grid grid-cols-7 gap-1">
+                      {weekWorkouts.map(({ label, workout }, i) => (
+                        <div key={i} className="flex flex-col items-center gap-1">
+                          <div
+                            className="w-full rounded"
+                            style={{
+                              height: '28px',
+                              backgroundColor: workout
+                                ? (typeColors[workout.type] || '#10b981')
+                                : '#f1f5f9',
+                              opacity: workout?.type === 'Rest' ? 0.4 : 1,
+                            }}
+                          />
+                          <span style={{ fontSize: '9px', color: '#94a3b8' }}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => navigate('/fitness')}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-gray-50"
+                    style={{ color: '#374151', borderColor: '#e2e8f0' }}
+                  >
+                    <Plus size={12} /> Log Workout
+                  </button>
+                </Card>
+              </motion.div>
+            </div>
+
+            {/* Row 3: Financial detail cards (TILT + EarnIn) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+              {/* TILT summary */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={Zap} iconBg="#fef3c7" iconColor="#d97706" title="TILT Credit" linkTo="/tilt" />
+                  {activeTilt ? (
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1">
+                        <p className="text-2xl font-bold" style={{ color: '#374151' }}>
+                          {formatCurrency(activeTilt.amountUsed)}
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
+                          of {formatCurrency(activeTilt.creditLimit || 400)} limit
+                        </p>
+                        <div className="h-1.5 rounded-full mt-2" style={{ backgroundColor: '#f1f5f9' }}>
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min(100, (activeTilt.amountUsed / (activeTilt.creditLimit || 400)) * 100)}%`,
+                              backgroundColor: '#d97706',
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs" style={{ color: '#94a3b8' }}>Due</p>
+                        <p className="text-sm font-semibold mt-0.5" style={{ color: '#374151' }}>
+                          {format(parseISO(activeTilt.repaymentDate), 'MMM d')}
+                        </p>
+                        <p className="text-lg font-bold" style={{ color: differenceInDays(parseISO(activeTilt.repaymentDate), today) <= 2 ? '#dc2626' : '#d97706' }}>
+                          {Math.max(0, differenceInDays(parseISO(activeTilt.repaymentDate), today))}d
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-4 text-center">
+                      <p className="text-sm font-medium" style={{ color: '#059669' }}>✓ No active advance</p>
+                      <Link to="/tilt" className="text-xs mt-1 inline-block" style={{ color: '#d97706' }}>
+                        Take advance →
+                      </Link>
+                    </div>
+                  )}
+                </Card>
+              </motion.div>
+
+              {/* EarnIn summary */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={TrendingUp} iconBg="#dcfce7" iconColor="#059669" title="Earn In" linkTo="/earnin" />
+                  {activeEarnIn ? (
+                    <div>
+                      <div className="grid grid-cols-4 gap-1 mb-3">
+                        {['fri','sat','sun','mon'].map(day => {
+                          const taken = activeEarnIn[`${day}_taken`]
+                          const defAmts = { fri: 155.99, sat: 155.99, sun: 155.99, mon: 53.99 }
+                          const amt = activeEarnIn.amounts?.[day] || defAmts[day]
+                          return (
+                            <div key={day} className="flex flex-col items-center gap-1">
+                              <div
+                                className="w-8 h-8 rounded-full flex items-center justify-center border"
+                                style={{
+                                  backgroundColor: taken ? '#dcfce7' : '#f8fafc',
+                                  borderColor: taken ? '#16a34a' : '#e2e8f0',
+                                }}
+                              >
+                                {taken
+                                  ? <CheckCircle2 size={14} style={{ color: '#16a34a' }} />
+                                  : <Circle size={14} style={{ color: '#cbd5e1' }} />
+                                }
+                              </div>
+                              <span className="text-[9px] uppercase font-medium" style={{ color: '#94a3b8' }}>{day}</span>
+                              <span className="text-[9px] font-mono" style={{ color: '#64748b' }}>${amt}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div className="flex justify-between text-xs pt-2 border-t" style={{ borderColor: '#f1f5f9' }}>
+                        <span style={{ color: '#64748b' }}>Repayment</span>
+                        <span className="font-semibold font-mono" style={{ color: '#dc2626' }}>
+                          -{formatCurrency(activeEarnIn.repaymentAmount || 521.96)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-4 text-center">
+                      <p className="text-sm" style={{ color: '#94a3b8' }}>No active cycle</p>
+                      <Link to="/earnin" className="text-xs mt-1 inline-block" style={{ color: '#059669' }}>
+                        Start cycle →
+                      </Link>
+                    </div>
+                  )}
+                </Card>
+              </motion.div>
+            </div>
+
+            {/* Row 4: Afterpay + Tonight's Dinner */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+              {/* AFTERPAY CARD */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={CreditCard} iconBg="#fce7f3" iconColor="#db2777" title="Afterpay" linkTo="/afterpay" linkLabel="View" />
+                  {activeAP ? (
+                    <div>
+                      <p className="text-sm font-semibold mb-1" style={{ color: '#374151' }}>{activeAP.name}</p>
+                      {nextAP && (
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <p className="text-xs" style={{ color: '#94a3b8' }}>Next payment</p>
+                            <p className="text-lg font-bold" style={{ color: '#db2777' }}>${nextAP.amount.toFixed(2)}</p>
+                            <p className="text-xs" style={{ color: '#64748b' }}>{format(parseISO(nextAP.dueDate), 'MMM d, yyyy')}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs" style={{ color: '#94a3b8' }}>Progress</p>
+                            <p className="text-xl font-bold" style={{ color: '#374151' }}>{apPaidCount}/{apTotalCount}</p>
+                            <p className="text-xs" style={{ color: '#94a3b8' }}>payments</p>
+                          </div>
+                        </div>
+                      )}
+                      {/* Progress bar */}
+                      <div className="h-2 rounded-full mb-2" style={{ backgroundColor: '#f1f5f9' }}>
+                        <div className="h-full rounded-full" style={{ width: `${apTotalCount > 0 ? (apPaidCount / apTotalCount) * 100 : 0}%`, backgroundColor: '#db2777' }} />
+                      </div>
+                      <p className="text-xs font-medium text-center" style={{ color: '#059669' }}>💚 Dad covers it — $0 net cost</p>
+                    </div>
+                  ) : (
+                    <div className="py-6 text-center">
+                      <p className="text-sm" style={{ color: '#94a3b8' }}>No active Afterpay plans</p>
+                    </div>
+                  )}
+                </Card>
+              </motion.div>
+
+              {/* TONIGHT'S DINNER CARD */}
+              <motion.div variants={card}>
+                <Card>
+                  <CardHeader icon={CalendarDays} iconBg="#fef9ee" iconColor="#d97706" title="Tonight's Dinner 🍳" linkTo="/cooking" linkLabel="Cooking" />
+                  {todayMealPlan ? (
+                    <div>
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="text-4xl">{todayMealPlan.emoji}</div>
+                        <div>
+                          <p className="text-sm font-semibold" style={{ color: '#374151' }}>{todayMealPlan.title}</p>
+                          {todayMealPlan.eatOut && <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Enjoy your date night!</p>}
+                        </div>
+                      </div>
+                      {!todayMealPlan.eatOut ? (
+                        <Link to="/cooking" className="flex items-center justify-center gap-1.5 py-2 w-full rounded-lg text-xs font-medium text-white" style={{ backgroundColor: '#d97706' }}>
+                          View Recipe →
+                        </Link>
+                      ) : (
+                        <div className="rounded-lg py-2 px-3 text-center text-xs font-medium" style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
+                          🎉 Date Night — No cooking tonight!
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="py-6 text-center">
+                      <p className="text-sm" style={{ color: '#94a3b8' }}>No meal planned for today</p>
+                      <Link to="/cooking" className="text-xs mt-1 inline-block" style={{ color: '#d97706' }}>View meal plan →</Link>
+                    </div>
+                  )}
+                </Card>
+              </motion.div>
+            </div>
+
+          </div>
+
+          {/* ─── RIGHT SIDEBAR (QUICK ACTIONS) ─────────────────────── */}
+          <div className="col-span-12 xl:col-span-3">
+            <motion.div variants={card} className="xl:sticky xl:top-7">
+              <Card>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#f1f5f9' }}>
+                    <Plus size={15} style={{ color: '#64748b' }} />
+                  </div>
+                  <span className="text-sm font-semibold" style={{ color: '#374151' }}>Quick Actions</span>
+                </div>
+
+                <div className="space-y-2">
+                  {[
+                    { label: 'Log Workout',      icon: Dumbbell,    to: '/fitness',  color: '#fee2e2', iconColor: '#dc2626' },
+                    { label: 'Add Habit',         icon: CheckSquare, to: '/habits',   color: '#dcfce7', iconColor: '#16a34a' },
+                    { label: 'New Goal',          icon: Target,      to: '/goals',    color: '#ede9fe', iconColor: '#7c3aed' },
+                    { label: 'Add Transaction',   icon: Plus,        to: '/expenses', color: '#fef3c7', iconColor: '#d97706' },
+                  ].map(({ label, icon: Icon, to, color, iconColor }) => (
+                    <Link
+                      key={label}
+                      to={to}
+                      className="flex items-center gap-3 p-3 rounded-lg border transition-all hover:shadow-sm hover:-translate-y-px"
+                      style={{ borderColor: '#e2e8f0', backgroundColor: '#fafafa' }}
+                    >
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color }}>
+                        <Icon size={15} style={{ color: iconColor }} />
+                      </div>
+                      <span className="text-sm font-medium" style={{ color: '#374151' }}>{label}</span>
+                      <ChevronRight size={14} className="ml-auto flex-shrink-0" style={{ color: '#cbd5e1' }} />
+                    </Link>
+                  ))}
+                </div>
+
+                {/* Upcoming bills / next 7 days */}
+                <div className="mt-5 pt-4 border-t" style={{ borderColor: '#f1f5f9' }}>
+                  <p className="text-xs font-semibold mb-3 uppercase tracking-wide" style={{ color: '#94a3b8' }}>
+                    Next 7 Days
+                  </p>
+                  {(() => {
+                    const evs = []
+                    const in7 = addDays(today, 7)
+                    // Monthly bills
+                    bills.filter(b => b.isActive && b.dueDay && b.frequency !== 'weekly').forEach(b => {
+                      const d = new Date(today.getFullYear(), today.getMonth(), b.dueDay)
+                      if ((isAfter(d, today) || d.toDateString() === today.toDateString()) && isBefore(d, in7))
+                        evs.push({ name: b.name, amount: -b.amount, date: d, type: 'bill' })
+                    })
+                    // Weekly bills — find each matching day-of-week in the next 7 days
+                    bills.filter(b => b.isActive && b.dueDay != null && b.frequency === 'weekly').forEach(b => {
+                      for (let j = 0; j <= 7; j++) {
+                        const d = addDays(today, j)
+                        if (d.getDay() === b.dueDay && (isAfter(d, today) || d.toDateString() === today.toDateString()) && isBefore(d, in7))
+                          evs.push({ name: b.name, amount: -b.amount, date: d, type: 'bill' })
+                      }
+                    })
+                    paychecks.forEach(p => {
+                      const d = parseISO(p.date)
+                      if ((isAfter(d, today) || d.toDateString() === today.toDateString()) && isBefore(d, in7))
+                        evs.push({ name: p.source || 'Paycheck', amount: p.amount, date: d, type: 'income' })
+                    })
+                    evs.sort((a, b) => a.date - b.date)
+                    if (!evs.length) return (
+                      <p className="text-xs" style={{ color: '#94a3b8' }}>Nothing due this week</p>
+                    )
+                    return evs.slice(0, 4).map((ev, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5 border-b last:border-0" style={{ borderColor: '#f8fafc' }}>
+                        <div
+                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: ev.type === 'income' ? '#059669' : '#dc2626' }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs truncate" style={{ color: '#374151' }}>{ev.name}</p>
+                          <p className="text-[10px]" style={{ color: '#94a3b8' }}>{format(ev.date, 'EEE, MMM d')}</p>
+                        </div>
+                        <span
+                          className="text-xs font-mono font-medium flex-shrink-0"
+                          style={{ color: ev.amount >= 0 ? '#059669' : '#dc2626' }}
+                        >
                           {ev.amount >= 0 ? '+' : ''}{formatCurrency(ev.amount)}
                         </span>
                       </div>
-                    )
-                  })}
-                  {upcomingPayments.length > 5 && (
-                    <p className="text-[10px] text-slate-500 text-center pt-1">
-                      +{upcomingPayments.length - 5} more
-                    </p>
-                  )}
+                    ))
+                  })()}
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-8 text-slate-500 gap-1">
-                  <CalendarDays size={22} className="opacity-30" />
-                  <p className="text-sm">All clear next 7 days</p>
-                </div>
-              )}
 
-              <Link to="/calendar" className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-500 hover:text-amber-400 transition-colors">
-                <span>Full calendar</span>
-                <ChevronRight size={12} />
-              </Link>
-            </div>
-          </motion.div>
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════
-            ROW 3 — Monthly spending + Mini calendar
-            ══════════════════════════════════════════════════════════════ */}
-        <div className="grid grid-cols-12 gap-4">
-
-          {/* Spending breakdown */}
-          <motion.div variants={card} className="col-span-12 lg:col-span-7">
-            <div className="card-glass p-5 h-full">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-7 h-7 rounded-lg bg-blue-500/15 flex items-center justify-center">
-                  <ShoppingCart size={14} className="text-blue-400" />
-                </div>
-                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">
-                  Spending Breakdown — {format(today, 'MMMM')}
-                </span>
-              </div>
-
-              {spendingByCategory.length > 0 ? (
-                <>
-                  <div className="flex items-center gap-4">
-                    <ResponsiveContainer width="42%" height={150}>
-                      <PieChart>
-                        <Pie
-                          data={spendingByCategory}
-                          cx="50%" cy="50%"
-                          innerRadius={42} outerRadius={65}
-                          paddingAngle={3} dataKey="value"
-                          animationBegin={300} animationDuration={1200}
-                          onClick={(data) => setExpandedCategory(c => c === data.name ? null : data.name)}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {spendingByCategory.map((_, i) => (
-                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip content={renderPieTooltip} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="flex-1 space-y-2">
-                      {spendingByCategory.map((cat, i) => {
-                        const total = spendingByCategory.reduce((s, c) => s + c.value, 0)
-                        const pct = total > 0 ? Math.round((cat.value / total) * 100) : 0
-                        const isExpanded = expandedCategory === cat.name
-                        return (
-                          <div key={cat.name}>
-                            <button
-                              onClick={() => setExpandedCategory(c => c === cat.name ? null : cat.name)}
-                              className="w-full text-left"
-                            >
-                              <div className="flex justify-between text-xs mb-1 hover:opacity-80 transition-opacity">
-                                <span className="text-slate-400 flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
-                                  {cat.name}
-                                  {isExpanded ? <ChevronUp size={9} /> : <ChevronDown size={9} />}
-                                </span>
-                                <span className="text-slate-300 font-mono">{formatCurrency(cat.value)}</span>
-                              </div>
-                              <div className="h-1 rounded-full bg-white/5">
-                                <motion.div
-                                  className="h-full rounded-full"
-                                  style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${pct}%` }}
-                                  transition={{ duration: 0.8, delay: 0.3 + i * 0.08 }}
-                                />
-                              </div>
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Category transaction expansion panel */}
-                  <AnimatePresence>
-                    {expandedCategory && transactionsByCategory[expandedCategory] && (
-                      <motion.div
-                        key={expandedCategory}
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.25 }}
-                        className="overflow-hidden mt-3"
-                      >
-                        <div className="pt-3 border-t border-white/10">
-                          <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mb-2">
-                            {expandedCategory} — {format(today, 'MMMM')} transactions
-                          </p>
-                          <div className="space-y-1 max-h-36 overflow-y-auto">
-                            {transactionsByCategory[expandedCategory].map(t => (
-                              <div key={t.id} className="flex justify-between text-xs">
-                                <span className="text-slate-400">{format(parseISO(t.date), 'MMM d')} · {t.note || t.category}</span>
-                                <span className="text-slate-300 font-mono flex-shrink-0 ml-2">-{formatCurrency(t.amount)}</span>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="mt-2 pt-2 border-t border-white/5 flex justify-between text-xs">
-                            <span className="text-slate-500">Total</span>
-                            <span className="text-slate-200 font-mono font-semibold">
-                              -{formatCurrency(transactionsByCategory[expandedCategory].reduce((s,t)=>s+t.amount,0))}
-                            </span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-500">
-                  <ShoppingCart size={24} className="opacity-30" />
-                  <p className="text-sm">No spending logged yet</p>
-                  <Link to="/expenses" className="text-xs text-amber-400 hover:text-amber-300">Add a transaction</Link>
-                </div>
-              )}
-            </div>
-          </motion.div>
-
-          {/* Mini calendar */}
-          <motion.div variants={card} className="col-span-12 lg:col-span-5">
-            <div className="card-glass p-5 h-full">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-7 h-7 rounded-lg bg-amber-500/15 flex items-center justify-center">
-                  <CalendarDays size={14} className="text-amber-400" />
-                </div>
-                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">
-                  {format(today, 'MMMM yyyy')}
-                </span>
-              </div>
-              <MiniCalendar events={calendarEvents} />
-              <div className="mt-3 flex gap-3 text-[10px] text-slate-500 border-t border-white/5 pt-2.5">
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />Income</span>
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />Bill</span>
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />Other</span>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════
-            ROW 4 — Recent transactions
-            ══════════════════════════════════════════════════════════════ */}
-        <motion.div variants={card}>
-          <div className="card-glass p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-slate-500/15 flex items-center justify-center">
-                  <ReceiptText size={14} className="text-slate-400" />
-                </div>
-                <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Recent Transactions</span>
-              </div>
-              <Link to="/expenses" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors">
-                View all <ArrowRight size={12} />
-              </Link>
-            </div>
-
-            {recentTxs.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-0.5">
-                {recentTxs.map((tx, i) => {
-                  const config = categoryConfig[tx.category] || categoryConfig.Other
-                  const Icon = config.icon
-                  return (
-                    <motion.div
-                      key={tx.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: i * 0.05 }}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
+                {/* Nav shortcuts */}
+                <div className="mt-4 pt-4 border-t space-y-1" style={{ borderColor: '#f1f5f9' }}>
+                  <p className="text-xs font-semibold mb-2 uppercase tracking-wide" style={{ color: '#94a3b8' }}>Finance</p>
+                  {[
+                    { label: 'Accounts & Debts', to: '/debts' },
+                    { label: 'Savings Goals', to: '/savings' },
+                    { label: 'Calendar', to: '/calendar' },
+                  ].map(({ label, to }) => (
+                    <Link
+                      key={to}
+                      to={to}
+                      className="flex items-center justify-between py-1.5 text-xs transition-colors hover:opacity-70"
+                      style={{ color: '#64748b' }}
                     >
-                      <div
-                        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                        style={{ backgroundColor: `${config.color}18` }}
-                      >
-                        <Icon size={15} style={{ color: config.color }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-200 truncate">{tx.note || tx.category}</p>
-                        <p className="text-[10px] text-slate-500">{tx.category} · {format(parseISO(tx.date), 'MMM d')}</p>
-                      </div>
-                      <span className={`text-sm font-mono font-semibold flex-shrink-0 ${tx.type === 'in' ? 'text-emerald-400' : 'text-slate-300'}`}>
-                        {tx.type === 'in' ? '+' : '−'}{formatCurrency(tx.amount)}
-                      </span>
-                    </motion.div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center py-10 gap-2 text-slate-500">
-                <ReceiptText size={28} className="opacity-20" />
-                <p className="text-sm">No transactions logged yet</p>
-                <Link to="/expenses" className="text-xs text-amber-400 hover:text-amber-300 mt-1">
-                  Add your first transaction
-                </Link>
-              </div>
-            )}
+                      <span>{label}</span>
+                      <ChevronRight size={12} />
+                    </Link>
+                  ))}
+                </div>
+              </Card>
+            </motion.div>
           </div>
-        </motion.div>
 
+        </div>
       </motion.div>
     </div>
   )

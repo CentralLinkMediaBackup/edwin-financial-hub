@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bell, Plus, Trash2, Pencil, X, Check,
-  ToggleRight, ToggleLeft, AlertTriangle, ChevronDown, ChevronUp, CheckCircle2,
+  ToggleRight, ToggleLeft, AlertTriangle, ChevronDown, ChevronUp, CheckCircle2, Ban,
 } from 'lucide-react'
 import { format, getDaysInMonth, getDate, addMonths } from 'date-fns'
 import { useStore } from '../store/useStore'
@@ -15,7 +15,8 @@ function getDaysUntilDue(dueDay) {
   const today = new Date()
   const currentDay = getDate(today)
   const daysInMonth = getDaysInMonth(today)
-  return dueDay >= currentDay ? dueDay - currentDay : daysInMonth - currentDay + dueDay
+  const effective = Math.min(dueDay, daysInMonth)
+  return effective >= currentDay ? effective - currentDay : daysInMonth - currentDay + effective
 }
 
 // Due date to show for an UNPAID bill
@@ -25,10 +26,12 @@ function getUnpaidDueDate(dueDay) {
   const currentDay = getDate(today)
   const year = today.getFullYear()
   const month = today.getMonth()
-  if (dueDay >= currentDay) return format(new Date(year, month, dueDay), 'MMM d')
-  const nextMonth = month === 11 ? 0 : month + 1
-  const nextYear = month === 11 ? year + 1 : year
-  return format(new Date(nextYear, nextMonth, dueDay), 'MMM d')
+  const daysInMonth = getDaysInMonth(today)
+  const effective = Math.min(dueDay, daysInMonth)
+  if (effective >= currentDay) return format(new Date(year, month, effective), 'MMM d')
+  const nextMonthDate = addMonths(today, 1)
+  const nextEffective = Math.min(dueDay, getDaysInMonth(nextMonthDate))
+  return format(new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth(), nextEffective), 'MMM d')
 }
 
 // Next cycle date for a PAID bill (advance to next occurrence)
@@ -36,7 +39,9 @@ function getNextCycleDueDate(bill) {
   if (!bill.dueDay) return 'Flexible'
   const today = new Date()
   const months = bill.frequency === 'bimonthly' ? 2 : 1
-  const next = addMonths(new Date(today.getFullYear(), today.getMonth(), bill.dueDay), months)
+  const nextMonthDate = addMonths(today, months)
+  const nextEffective = Math.min(bill.dueDay, getDaysInMonth(nextMonthDate))
+  const next = new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth(), nextEffective)
   return format(next, 'MMM d, yyyy')
 }
 
@@ -52,6 +57,15 @@ function groupByMonth(txs) {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function isCancelled(bill) {
+  return !bill.isActive && bill.note?.startsWith('CANCELLED')
+}
+
+function cancelledExpiry(bill) {
+  const m = bill.note?.match(/(?:expires?|expired)\s+([A-Za-z]+\s+\d+,?\s*\d{4})/i)
+  return m ? m[1] : null
+}
 
 function DaysChip({ daysUntil }) {
   if (daysUntil === null) return <span className="text-slate-500 text-xs">Flexible</span>
@@ -102,13 +116,14 @@ function ConfirmDialog({ title, body, confirmLabel, confirmClass, onConfirm, onC
 }
 
 function BillModal({ bill, onClose, onSave }) {
-  const [name, setName]         = useState(bill?.name || '')
-  const [amount, setAmount]     = useState(bill?.amount || '')
-  const [dueDay, setDueDay]     = useState(bill?.dueDay || '')
-  const [frequency, setFreq]    = useState(bill?.frequency || 'monthly')
-  const [isActive, setIsActive] = useState(bill?.isActive ?? true)
-  const [note, setNote]         = useState(bill?.note || '')
-  const [category, setCategory] = useState(bill?.category || 'Other')
+  const [name, setName]             = useState(bill?.name || '')
+  const [amount, setAmount]         = useState(bill?.amount || '')
+  const [dueDay, setDueDay]         = useState(bill?.dueDay || '')
+  const [flexibleDue, setFlexible]  = useState(!bill?.dueDay)
+  const [frequency, setFreq]        = useState(bill?.frequency || 'monthly')
+  const [isActive, setIsActive]     = useState(bill?.isActive ?? true)
+  const [note, setNote]             = useState(bill?.note || '')
+  const [category, setCategory]     = useState(bill?.category || 'Other')
 
   const CATEGORIES = ['Housing','Utilities','Entertainment','Phone','Transport','Food','Health','Education','Insurance','Shopping','Debt','Business','Other']
   const FREQUENCIES = [
@@ -119,7 +134,8 @@ function BillModal({ bill, onClose, onSave }) {
 
   const handleSave = () => {
     if (!name || !amount) return
-    onSave({ name, amount: parseFloat(amount) || 0, dueDay: dueDay ? parseInt(dueDay) : null, frequency, isActive, note, category })
+    const resolvedDueDay = flexibleDue ? null : (dueDay ? parseInt(dueDay) : null)
+    onSave({ name, amount: parseFloat(amount) || 0, dueDay: resolvedDueDay, frequency, isActive, note, category })
     onClose()
   }
 
@@ -154,10 +170,27 @@ function BillModal({ bill, onClose, onSave }) {
             </div>
           </div>
           <div>
-            <label className="text-sm text-slate-400 block mb-1">Due Day (number, e.g. 15)</label>
-            <input type="number" value={dueDay} onChange={e => setDueDay(e.target.value)} placeholder="Leave blank for flexible"
-              className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
-              min="1" max="31" />
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm text-slate-400">Due Day</label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <span className="text-xs text-slate-500">Flexible due date</span>
+                <div
+                  onClick={() => { setFlexible(f => !f); if (!flexibleDue) setDueDay('') }}
+                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${flexibleDue ? 'bg-amber-500' : 'bg-white/10'}`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${flexibleDue ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </div>
+              </label>
+            </div>
+            {flexibleDue ? (
+              <div className="px-3 py-2 rounded-lg text-sm text-slate-400 bg-white/5 border border-white/10">
+                Flexible — no fixed due date
+              </div>
+            ) : (
+              <input type="number" value={dueDay} onChange={e => setDueDay(e.target.value)} placeholder="e.g. 15"
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:border-amber-500/50 focus:outline-none"
+                min="1" max="31" />
+            )}
           </div>
           <div>
             <label className="text-sm text-slate-400 block mb-2">Frequency</label>
@@ -363,6 +396,9 @@ export default function Subscriptions() {
                 const daysUntil  = isPaid ? null : getDaysUntilDue(bill.dueDay)
                 const displayDue = isPaid ? getNextCycleDueDate(bill) : getUnpaidDueDate(bill.dueDay)
 
+                const cancelled = isCancelled(bill)
+                const expiry    = cancelled ? cancelledExpiry(bill) : null
+
                 return (
                   <motion.tr
                     key={bill.id}
@@ -372,6 +408,8 @@ export default function Subscriptions() {
                     className={`border-b border-white/5 transition-colors ${
                       isPaid
                         ? 'bg-emerald-500/20 hover:bg-emerald-500/25 cursor-pointer'
+                        : cancelled
+                        ? 'bg-red-500/5 opacity-70 hover:bg-red-500/10'
                         : !bill.isActive
                         ? 'opacity-50 hover:bg-white/5'
                         : 'hover:bg-white/5'
@@ -383,9 +421,22 @@ export default function Subscriptions() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {isPaid && <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />}
+                        {cancelled && <Ban size={13} className="text-red-400 flex-shrink-0" />}
                         <div>
-                          <p className={`font-medium ${isPaid ? 'text-emerald-200' : 'text-white'}`}>{bill.name}</p>
-                          {bill.category && <p className={`text-xs ${isPaid ? 'text-emerald-400/70' : 'text-slate-500'}`}>{bill.category}</p>}
+                          <div className="flex items-center gap-2">
+                            <p className={`font-medium ${isPaid ? 'text-emerald-200' : cancelled ? 'text-red-200 line-through' : 'text-white'}`}>{bill.name}</p>
+                            {cancelled && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 whitespace-nowrap">
+                                Cancelled
+                              </span>
+                            )}
+                          </div>
+                          {cancelled && expiry && (
+                            <p className="text-xs text-red-400/70 mt-0.5">Access: {expiry}</p>
+                          )}
+                          {!cancelled && bill.category && (
+                            <p className={`text-xs ${isPaid ? 'text-emerald-400/70' : 'text-slate-500'}`}>{bill.category}</p>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -406,12 +457,14 @@ export default function Subscriptions() {
                     </td>
 
                     {/* Next Due */}
-                    <td className={`px-4 py-3 text-xs whitespace-nowrap ${isPaid ? 'text-emerald-300' : 'text-slate-300'}`}>
+                    <td className={`px-4 py-3 text-xs whitespace-nowrap ${isPaid ? 'text-emerald-300' : cancelled ? 'text-red-400/70' : 'text-slate-300'}`}>
                       {isPaid ? (
                         <span className="flex items-center gap-1">
                           <span className="text-emerald-500 text-[10px] font-medium">NEXT:</span>
                           {displayDue}
                         </span>
+                      ) : cancelled ? (
+                        expiry ? <span>Expires {expiry}</span> : <span>—</span>
                       ) : displayDue}
                     </td>
 
@@ -419,6 +472,8 @@ export default function Subscriptions() {
                     <td className="px-4 py-3">
                       {isPaid
                         ? <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Paid ✓</span>
+                        : cancelled
+                        ? <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-500/20 text-red-400 border border-red-500/30">Cancelled</span>
                         : <DaysChip daysUntil={daysUntil} />
                       }
                     </td>
@@ -427,6 +482,8 @@ export default function Subscriptions() {
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       {isPaid ? (
                         <span className="text-xs text-emerald-400 font-medium">Paid this month</span>
+                      ) : cancelled ? (
+                        <span className="text-xs text-red-400/70 font-medium">No further charges</span>
                       ) : (
                         <motion.button
                           whileTap={{ scale: 0.95 }}
