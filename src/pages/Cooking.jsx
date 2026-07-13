@@ -17,11 +17,11 @@ const C = {
 // ── Weekly meal plan — exported for Dashboard + Calendar ─────────────────────
 // Keyed by JS day-of-week (0=Sun … 6=Sat)
 export const WEEK_MEAL_PLAN = {
-  1: { emoji: '🥞', title: 'Bún Xèo (Vietnamese Sizzling Crepes)', mealId: 12 },
-  2: { emoji: '🌮', title: 'Carne Asada Tacos', mealId: 13 },
-  3: { emoji: '🍝', title: 'Marry Me Chicken Pasta', mealId: 14 },
-  4: { emoji: '🍗', title: 'Chicken Tikka Masala + Rice', mealId: 15 },
-  5: { emoji: '🎉', title: 'Eating Out!', mealId: null, eatOut: true },
+  1: { emoji: '🍗', title: 'Honey Garlic Chicken Thighs + Rice', mealId: 17 },
+  2: { emoji: '🍤', title: 'Garlic Butter Shrimp + Rice', mealId: 18 },
+  3: { emoji: '🥩', title: 'Beef & Broccoli + Rice', mealId: 19 },
+  4: { emoji: '🥘', title: 'Family Bowl', mealId: 20 },
+  5: { emoji: '🍽️', title: 'Eating Out 🍽️', mealId: null, eatOut: true },
 }
 export function getTodaysMeal() { return WEEK_MEAL_PLAN[new Date().getDay()] || null }
 
@@ -320,7 +320,7 @@ const MEALS = [
   },
   // ── Week of Jul 7 ─────────────────────────────────────────────────────────────
   {
-    id: 12, day: 'Monday', date: 'July 7', emoji: '🥞', bg: '#fefce8',
+    id: 12, day: 'Monday', date: 'July 7', emoji: '🥞', bg: '#fefce8', weekTag: 'Week of Jul 7',
     title: 'Bún Xèo (Vietnamese Sizzling Crepes)',
     desc: 'Crispy turmeric rice crepes filled with shrimp and bean sprouts, wrapped in lettuce and dipped in nuoc cham',
     ingredients: [
@@ -357,7 +357,7 @@ const MEALS = [
     ],
   },
   {
-    id: 13, day: 'Tuesday', date: 'July 8', emoji: '🌮', bg: '#fef2f2',
+    id: 13, day: 'Tuesday', date: 'July 8', emoji: '🌮', bg: '#fef2f2', weekTag: 'Week of Jul 7',
     title: 'Carne Asada Tacos',
     desc: 'Lime-garlic marinated grilled steak, sliced thin and piled onto warm corn tortillas with fresh pico',
     ingredients: [
@@ -388,7 +388,7 @@ const MEALS = [
     ],
   },
   {
-    id: 14, day: 'Wednesday', date: 'July 9', emoji: '🍝', bg: '#fff1f2',
+    id: 14, day: 'Wednesday', date: 'July 9', emoji: '🍝', bg: '#fff1f2', weekTag: 'Week of Jul 7',
     title: 'Marry Me Chicken Pasta',
     desc: 'Seared chicken and pasta in a creamy sun-dried tomato parmesan sauce with thyme and a little heat',
     ingredients: [
@@ -421,7 +421,7 @@ const MEALS = [
     ],
   },
   {
-    id: 15, day: 'Thursday', date: 'July 10', emoji: '🍗', bg: '#fff7ed',
+    id: 15, day: 'Thursday', date: 'July 10', emoji: '🍗', bg: '#fff7ed', weekTag: 'Week of Jul 7',
     title: 'Chicken Tikka Masala + Rice',
     desc: 'Garam masala marinated chicken simmered in a creamy coconut tomato curry, served over rice',
     ingredients: [
@@ -455,8 +455,145 @@ const MEALS = [
     ],
   },
   {
-    id: 16, day: 'Friday', date: 'July 11', emoji: '🎉', bg: '#f8fafc', eatOut: true,
+    id: 16, day: 'Friday', date: 'July 11', emoji: '🎉', bg: '#f8fafc', eatOut: true, weekTag: 'Week of Jul 7',
     title: 'Eating Out!',
+    desc: 'Friday night — you and the wife eat out. Enjoy!',
+    ingredients: [], steps: [],
+  },
+  // ── Week of Jul 14 ─────────────────────────────────────────────────────────────
+  {
+    id: 17, day: 'Monday', date: 'July 14', emoji: '🍗', bg: '#fef9ee',
+    title: 'Honey Garlic Chicken Thighs + Rice',
+    desc: 'Juicy chicken thighs glazed in a rich honey garlic sauce served over fluffy white rice',
+    ingredients: [
+      { name: 'Chicken thighs (bone-in or boneless)', qty: '4 pieces' },
+      { name: 'Honey', qty: '3 tbsp' },
+      { name: 'Soy sauce', qty: '2 tbsp' },
+      { name: 'Garlic cloves', qty: '4, minced' },
+      { name: 'Chicken broth', qty: '¼ cup' },
+      { name: 'Butter', qty: '1 tbsp' },
+      { name: 'Olive oil', qty: '1 tbsp' },
+      { name: 'White rice', qty: '1.5 cups dry' },
+      { name: 'Green onions', qty: 'garnish' },
+      { name: 'Salt & pepper', qty: 'generous' },
+    ],
+    steps: [
+      { title: 'Make the honey garlic sauce', type: 'prep', stove: null, min: null, warn: null,
+        items: ['In a small bowl mix: 3 tbsp honey + 2 tbsp soy sauce + ¼ cup chicken broth', 'Add 2 cloves minced garlic — stir to combine', 'Set aside next to the stove'], tip: null },
+      { title: 'Start the rice', type: 'cook', stove: 'High → Lo', min: 18, warn: null,
+        items: ['Rinse 1.5 cups rice until water clears', 'Add to pot: rice + 3 cups water + pinch of salt', 'Bring to boil on High, then cover and drop to Lo', 'Cook 16–18 min, then turn off — keep covered 5 min'], tip: null },
+      { title: 'Season the chicken', type: 'prep', stove: null, min: null, warn: null,
+        items: ['Pat all 4 thighs dry with paper towels', 'Season both sides generously with salt and pepper', 'Mince remaining 2 garlic cloves — set aside'], tip: '💡 Dry chicken skin = crispy crust. Wet = steamed.' },
+      { title: 'Sear the chicken', type: 'cook', stove: 'Med–6', min: 12, warn: null,
+        items: ['Heat pan to Med–6, add 1 tbsp olive oil', 'Lay thighs skin-side down — should sizzle loudly', 'Cook 6–7 min without touching — let the skin crisp', 'Flip — cook 5–6 more min. Firm to touch = done. No pink inside.'], tip: '💡 No peeking while skin crisps — patience builds the crust.' },
+      { title: 'Build the sauce in the pan', type: 'cook', stove: 'Med', min: 4, warn: null,
+        items: ['Remove chicken to a plate', 'Drop heat to Med, add remaining garlic — stir 30 sec until fragrant', 'Pour in honey garlic sauce — it will sizzle up fast', 'Let simmer 2–3 min, stirring, until slightly thickened'], tip: '💡 The pan drippings from the chicken make the sauce incredible.' },
+      { title: 'Glaze the chicken & plate', type: 'cook', stove: 'Lo', min: 2, warn: null,
+        items: ['Return chicken to pan, spoon sauce over the top', 'Drop to Lo — let chicken soak in sauce 1–2 min', 'Fluff the rice with a fork', 'Rice into bowls, place chicken on top', 'Drizzle remaining sauce over everything', 'Top with sliced green onions'], tip: null },
+    ],
+  },
+  {
+    id: 18, day: 'Tuesday', date: 'July 15', emoji: '🍤', bg: '#f0f9ff',
+    title: 'Garlic Butter Shrimp + Rice',
+    desc: 'Plump shrimp cooked in a garlicky lemon butter sauce served over white rice',
+    ingredients: [
+      { name: 'Shrimp peeled & deveined', qty: '1 lb' },
+      { name: 'Butter', qty: '3 tbsp' },
+      { name: 'Garlic cloves', qty: '4, minced' },
+      { name: 'Limes', qty: '2, juiced' },
+      { name: 'White rice', qty: '1 cup dry' },
+      { name: 'Red pepper flakes', qty: '¼ tsp' },
+      { name: 'Green onions', qty: 'garnish' },
+      { name: 'Salt & pepper', qty: 'generous' },
+    ],
+    steps: [
+      { title: 'Start the rice', type: 'cook', stove: 'High → Lo', min: 18, warn: null,
+        items: ['Rinse 1 cup rice until water clears', 'Add to pot: rice + 2 cups water + pinch of salt', 'Bring to boil on High, cover and drop to Lo', 'Cook 16–18 min, turn off — keep covered 5 min'], tip: null },
+      { title: 'Prep the shrimp', type: 'prep', stove: null, min: null, warn: null,
+        items: ['Pat shrimp completely dry with paper towels', 'Season with salt, pepper, and a pinch of red pepper flakes', 'Mince 4 garlic cloves — set aside', 'Juice both limes into a small bowl'], tip: '💡 Dry shrimp = great sear. Wet shrimp = steams and gets rubbery.' },
+      { title: 'Wash board & knife', type: 'wash', stove: null, min: null, warn: 'Raw shrimp — wash now',
+        items: ['Wash cutting board and knife with hot soapy water', 'Wash your hands'], tip: null },
+      { title: 'Sear the shrimp', type: 'cook', stove: 'High–8', min: 4, warn: 'Hot pan — careful',
+        items: ['Heat pan to High–8, add 1 tbsp butter', 'Shrimp in single layer — work in batches if needed', 'Cook 1.5–2 min first side without moving', 'Flip — cook 1–1.5 min more. Pink and curled into a C = done', 'Remove to a plate immediately'], tip: '💡 The second they curl into a C shape, pull them. They cook fast.' },
+      { title: 'Make the garlic butter sauce', type: 'cook', stove: 'Med', min: 3, warn: null,
+        items: ['Drop heat to Med, add remaining 2 tbsp butter', 'Add all the minced garlic — stir 30–45 sec until fragrant', 'Pour in lime juice — let it sizzle and reduce 1 min', 'Add a pinch of red pepper flakes'], tip: "💡 Don't let the garlic brown — it gets bitter. Keep it moving." },
+      { title: 'Toss & plate', type: 'cook', stove: 'Lo', min: 1, warn: null,
+        items: ['Return shrimp to pan, toss in the garlic butter sauce 30 sec', 'Fluff rice with a fork', 'Rice into bowls, shrimp and sauce over top', 'Garnish with sliced green onions and a squeeze of lime'], tip: null },
+    ],
+  },
+  {
+    id: 19, day: 'Wednesday', date: 'July 16', emoji: '🥩', bg: '#fff1f2',
+    title: 'Beef & Broccoli + Rice',
+    desc: 'Tender seared beef and crisp broccoli tossed in a savory sesame soy sauce over steamed rice',
+    ingredients: [
+      { name: 'Beef sirloin or flank (thin sliced)', qty: '1 lb' },
+      { name: 'Broccoli florets', qty: '1 bag (about 12 oz)' },
+      { name: 'Garlic cloves', qty: '3, minced' },
+      { name: 'Soy sauce', qty: '3 tbsp' },
+      { name: 'Sesame oil', qty: '1 tsp' },
+      { name: 'Honey', qty: '1 tbsp' },
+      { name: 'Cornstarch', qty: '1 tbsp' },
+      { name: 'White rice', qty: '1 cup dry' },
+      { name: 'Vegetable oil', qty: '2 tbsp' },
+      { name: 'Red pepper flakes', qty: 'pinch (optional)' },
+      { name: 'Salt & pepper', qty: 'to taste' },
+    ],
+    steps: [
+      { title: 'Make the sauce', type: 'prep', stove: null, min: null, warn: null,
+        items: ['In a bowl mix: 3 tbsp soy sauce + 1 tbsp honey + 1 tsp sesame oil + 1 tbsp cornstarch + 2 tbsp water', 'Stir until cornstarch fully dissolves — set aside next to the stove'], tip: '💡 Have this ready before cooking — stir fry moves fast.' },
+      { title: 'Prep the beef', type: 'prep', stove: null, min: null, warn: null,
+        items: ['If not pre-sliced: slice beef thin against the grain', 'Pat dry with paper towels, season with salt and pepper', 'Mince garlic cloves — set aside'], tip: null },
+      { title: 'Wash board & knife', type: 'wash', stove: null, min: null, warn: 'Raw beef — wash now',
+        items: ['Wash cutting board and knife with hot soapy water', 'Wash your hands'], tip: null },
+      { title: 'Start the rice', type: 'cook', stove: 'High → Lo', min: 18, warn: null,
+        items: ['Rinse 1 cup rice until water clears', 'Boil with 2 cups water on High', 'Drop to Lo, cover 16–18 min, then 5 min off'], tip: null },
+      { title: 'Sear the beef', type: 'cook', stove: 'High', min: 4, warn: 'Very hot — careful',
+        items: ['Heat pan to High — screaming hot before you add the beef', 'Add 1 tbsp vegetable oil', 'Beef in a single layer — do not crowd (cook in batches if needed)', 'Sear 1–2 min per side — pull to plate when browned'], tip: '💡 High heat = tender beef with a crust. Medium heat = tough and steamed.' },
+      { title: 'Stir fry the broccoli', type: 'cook', stove: '6–8', min: 5, warn: null,
+        items: ['Drop to 6–8, add 1 tbsp vegetable oil', 'Add broccoli florets — stir fry 2–3 min', 'Add minced garlic + red pepper flakes — stir 30 sec until fragrant'], tip: null },
+      { title: 'Add sauce + beef', type: 'cook', stove: '6–8', min: 3, warn: null,
+        items: ['Return beef to the pan', 'Pour sauce over everything — it will sizzle', 'Toss and stir until sauce thickens and coats everything (1–2 min)', 'If too thick, splash in a tbsp of water'], tip: '💡 Cornstarch activates with heat — sauce goes from thin to glossy fast.' },
+      { title: 'Plate & serve', type: 'prep', stove: null, min: null, warn: null,
+        items: ['Fluff rice with a fork', 'Rice into bowls, beef and broccoli over top', 'Drizzle any remaining sauce from the pan'], tip: null },
+    ],
+  },
+  {
+    id: 20, day: 'Thursday', date: 'July 17', emoji: '🥘', bg: '#fdf4ff',
+    title: 'Family Bowl',
+    desc: 'A hearty one-pan meal with ground beef, sausage, ham, potatoes, corn, and peppers over rice',
+    ingredients: [
+      { name: 'Ground beef', qty: '1 lb' },
+      { name: 'Smoked sausage', qty: '1 pack, sliced into rounds' },
+      { name: 'Ham', qty: '½ lb, diced' },
+      { name: 'Russet potatoes', qty: '2, diced small' },
+      { name: 'Bell peppers', qty: '2, sliced' },
+      { name: 'Yellow onion', qty: '1, diced' },
+      { name: 'Corn', qty: '1 can, drained' },
+      { name: 'Garlic cloves', qty: '3, minced' },
+      { name: 'White rice', qty: '1.5 cups dry' },
+      { name: 'Olive oil', qty: '2 tbsp' },
+      { name: 'Salt & pepper', qty: 'generous' },
+    ],
+    steps: [
+      { title: 'Start the rice', type: 'cook', stove: 'High → Lo', min: 18, warn: null,
+        items: ['Rinse 1.5 cups rice until water clears', 'Boil with 3 cups water + pinch of salt on High', 'Drop to Lo, cover 16–18 min, then 5 min off'], tip: null },
+      { title: 'Cook the potatoes first', type: 'cook', stove: 'Med–6', min: 12, warn: null,
+        items: ['Dice potatoes into ½-inch cubes', 'Heat large pan to Med–6, add 1 tbsp olive oil', 'Add potatoes in single layer, cook 5–6 min without touching', 'Toss and cook 5–6 more min until golden and fork-tender', 'Season with salt and pepper — remove to a plate'], tip: '💡 Potatoes go first because they take longest. Start while rice cooks.' },
+      { title: 'Brown the ground beef', type: 'cook', stove: '6–8', min: 8, warn: null,
+        items: ['Crank heat to 6–8, add beef to same pan', 'Break apart with a spatula as it cooks', 'Cook 6–8 min, stirring occasionally, until fully browned and no pink remains', "Drain any excess fat if there's a lot"], tip: null },
+      { title: 'Add sausage + ham', type: 'cook', stove: 'Med–6', min: 5, warn: null,
+        items: ['Add sliced sausage rounds and diced ham to the beef', 'Cook 3–4 min, stirring occasionally, until sausage is lightly browned', 'Everything should smell incredible by now'], tip: null },
+      { title: 'Add veggies + garlic', type: 'cook', stove: 'Med–6', min: 6, warn: null,
+        items: ['Add diced onion + sliced bell peppers to the pan', 'Cook 3–4 min until softened with a little char', 'Add minced garlic — stir 30 sec until fragrant', 'Add drained corn — stir to combine'], tip: null },
+      { title: 'Combine & season', type: 'cook', stove: 'Med', min: 3, warn: null,
+        items: ['Return cooked potatoes back to the pan', 'Drop heat to Med', 'Toss everything together — season generously with salt and pepper', 'Taste and adjust — this is a hearty dish, it needs good seasoning', 'Cook 2–3 min until everything is heated through'], tip: '💡 Taste as you season — salt brings all these flavors together.' },
+      { title: 'Plate & serve', type: 'prep', stove: null, min: null, warn: null,
+        items: ['Fluff rice with a fork', 'Big scoop of rice in each bowl', 'Load the Family Bowl mixture over the top', 'Serve immediately while piping hot'], tip: null },
+    ],
+  },
+  {
+    id: 21, day: 'Friday', date: 'July 18', emoji: '🍽️', bg: '#f8fafc', eatOut: true,
+    title: 'Eating Out 🍽️',
     desc: 'Friday night — you and the wife eat out. Enjoy!',
     ingredients: [], steps: [],
   },
@@ -467,50 +604,40 @@ const ALL_RECIPE_MEALS = MEALS.filter(m => !m.eatOut)
 
 // ── Grocery sections ──────────────────────────────────────────────────────────
 const DEFAULT_GROCERY_SECTIONS = [
-  { title: '🥩 Meat', items: [
-    { name: 'Flank steak or skirt steak', detail: '1.5 lbs — Carne Asada', price: '$9.00' },
-    { name: 'Chicken breasts', detail: '2 lbs — Marry Me Chicken + Tikka', price: '$7.00' },
+  { title: '🥩 Meat & Seafood', items: [
+    { name: 'Chicken thighs (bone-in or boneless)', detail: '4 pieces — Honey Garlic Chicken', price: '$6.00' },
+    { name: 'Shrimp peeled & deveined', detail: '1 lb — Garlic Butter Shrimp', price: '$9.00' },
+    { name: 'Beef sirloin or flank (thin sliced)', detail: '1 lb — Beef & Broccoli', price: '$8.00' },
+    { name: 'Ground beef', detail: '1 lb — Family Bowl', price: '$5.00' },
+    { name: 'Smoked sausage', detail: '1 pack — Family Bowl', price: '$4.00' },
+    { name: 'Ham (½ lb diced)', detail: 'Family Bowl', price: '$3.00' },
   ]},
   { title: '🥬 Produce', items: [
-    { name: 'Limes', detail: '4 — Carne Asada + Bún Xèo', price: '$1.50' },
-    { name: 'White onion', detail: '1 — Carne Asada', price: '$0.75' },
     { name: 'Garlic', detail: '1 head — multiple dishes', price: '$0.75' },
-    { name: 'Cilantro', detail: '1 bunch — Carne Asada + Bún Xèo', price: '$1.00' },
-    { name: 'Bean sprouts', detail: '1 bag — Bún Xèo', price: '$1.50' },
-    { name: 'Green onions', detail: '1 bunch — Bún Xèo', price: '$1.00' },
-    { name: 'Mint or basil', detail: '1 bunch — Bún Xèo', price: '$1.50' },
-    { name: 'Jalapeño', detail: '2 — Carne Asada', price: '$0.50' },
+    { name: 'Broccoli florets', detail: '1 bag — Beef & Broccoli', price: '$2.00' },
+    { name: 'Bell peppers', detail: '2 — Family Bowl', price: '$1.50' },
+    { name: 'Yellow onion', detail: '1 — Family Bowl', price: '$0.75' },
+    { name: 'Russet potatoes', detail: '2 — Family Bowl', price: '$1.50' },
+    { name: 'Limes', detail: '2 — Garlic Butter Shrimp', price: '$1.00' },
+    { name: 'Green onions', detail: '1 bunch — garnish multiple dishes', price: '$1.00' },
   ]},
   { title: '🧀 Dairy', items: [
-    { name: 'Heavy cream', detail: '1 cup — Marry Me Chicken', price: '$2.50' },
-    { name: 'Parmesan shredded', detail: '1 bag — Marry Me Chicken', price: '$4.00' },
+    { name: 'Butter', detail: '1 stick — multiple dishes', price: '$2.00' },
   ]},
-  { title: '🥫 Canned & Pantry', items: [
-    { name: 'Crushed tomatoes', detail: '1 can — Tikka', price: '$1.50' },
-    { name: 'Coconut milk', detail: '1 can — Tikka', price: '$2.00' },
-    { name: 'Sun dried tomatoes', detail: '1 jar — Marry Me Chicken', price: '$4.00' },
-    { name: 'Chicken broth', detail: '1 carton — Marry Me Chicken + Tikka', price: '$2.50' },
-    { name: 'Fish sauce', detail: 'small bottle — Bún Xèo', price: '$3.00' },
-    { name: 'Rice flour', detail: 'small bag — Bún Xèo', price: '$2.50' },
-    { name: 'Corn tortillas', detail: '1 pack — Carne Asada', price: '$2.00' },
-    { name: 'Turmeric', detail: 'small jar — Bún Xèo', price: '$2.00' },
-  ]},
-  { title: '🧂 Spices', items: [
-    { name: 'Garlic powder', detail: '', price: '$1.50' },
-    { name: 'Garam masala', detail: 'Tikka', price: '$2.50' },
-    { name: 'Dried thyme', detail: 'Marry Me Chicken', price: '$2.00' },
-    { name: 'Red pepper flakes', detail: 'Marry Me Chicken', price: '$2.00' },
-  ]},
-  { title: '🍚 Dry Goods', items: [
-    { name: 'Penne or fettuccine', detail: '1 lb — Marry Me Chicken', price: '$2.00' },
-    { name: 'Shrimp', detail: '½ lb — Bún Xèo filling', price: '$5.00' },
+  { title: '🥫 Pantry', items: [
+    { name: 'White rice', detail: '2 lb bag — all week', price: '$3.00' },
+    { name: 'Honey', detail: '1 bottle — Honey Garlic Chicken + Beef & Broccoli', price: '$4.00' },
+    { name: 'Chicken broth', detail: '1 carton — Honey Garlic Chicken sauce', price: '$2.50' },
+    { name: 'Corn', detail: '1 can — Family Bowl', price: '$1.00' },
+    { name: 'Sesame oil', detail: 'small bottle — Beef & Broccoli', price: '$3.50' },
+    { name: 'Red pepper flakes', detail: 'multiple dishes', price: '$2.00' },
   ]},
 ]
 
 // ── Grocery budget ────────────────────────────────────────────────────────────
-const GROCERY_BUDGET = 71
-const GROCERY_MIN    = 67
-const GROCERY_MAX    = 75
+const GROCERY_BUDGET = 64
+const GROCERY_MIN    = 60
+const GROCERY_MAX    = 68
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtTime(s) { const m = Math.floor(s/60), se = s%60; return `${m}:${se<10?'0':''}${se}` }
@@ -523,13 +650,15 @@ function getCurrentMonday() {
 function deepClone(s) { return s.map(sec => ({ ...sec, items: sec.items.map(i => ({ ...i })) })) }
 function parsePrice(p) { const v = parseFloat((p||'').replace('$','')); return isNaN(v) ? 0 : v }
 
-const STORAGE_KEY = 'ck-dashboard-v4'
+const STORAGE_KEY = 'ck-dashboard-v5'
 function loadState() { try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null } catch { return null } }
 function saveState(data) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)) } catch {} }
 function loadImages() { try { const r = localStorage.getItem('ck-images'); return r ? JSON.parse(r) : {} } catch { return {} } }
 function saveImages(imgs) { try { localStorage.setItem('ck-images', JSON.stringify(imgs)) } catch {} }
 function loadRatings() { try { const r = localStorage.getItem('ck-ratings'); return r ? JSON.parse(r) : {} } catch { return {} } }
 function saveRatings(rs) { try { localStorage.setItem('ck-ratings', JSON.stringify(rs)) } catch {} }
+function loadDayOrder() { try { const r = localStorage.getItem('ck-day-order'); return r ? JSON.parse(r) : [17, 18, 19, 20] } catch { return [17, 18, 19, 20] } }
+function saveDayOrder(o) { try { localStorage.setItem('ck-day-order', JSON.stringify(o)) } catch {} }
 
 function initTimers() {
   const ts = {}
@@ -674,7 +803,7 @@ function ImageZone({ meal, images, onSave, size = 'card' }) {
 export default function Cooking() {
   const store = useStore()
   const [activeTab, setActiveTab] = useState('overview')
-  const [mealDone, setMealDone] = useState(new Set())
+  const [mealDone, setMealDone] = useState(() => new Set([12, 13, 14, 15]))
   const [mealIngChecked, setMealIngChecked] = useState({})
   const [stepDone, setStepDone] = useState({})
   const [grocerySections, setGrocerySections] = useState(() => deepClone(DEFAULT_GROCERY_SECTIONS))
@@ -693,9 +822,15 @@ export default function Cooking() {
   const [celebration, setCelebration] = useState(null) // mealId
   const [images, setImages] = useState(() => loadImages())
   const [ratings, setRatings] = useState(() => loadRatings())
+  const [dayOrder, setDayOrder] = useState(() => loadDayOrder())
+  const [dragFromIdx, setDragFromIdx] = useState(null)
+  const [dragOver, setDragOver] = useState(null)
 
-  const todayDayName = new Date().toLocaleDateString('en-US', { weekday:'long' })
-  const todayMeal = WEEK_MEAL_PLAN[new Date().getDay()]
+  const todayDow = new Date().getDay()
+  const todayAssignedMealId = todayDow >= 1 && todayDow <= 4 ? dayOrder[todayDow - 1] : null
+  const todayMeal = todayDow === 5
+    ? { emoji: '🍽️', title: 'Eating Out 🍽️', eatOut: true, mealId: null }
+    : todayAssignedMealId ? (MEALS.find(m => m.id === todayAssignedMealId) || null) : null
 
   // ── Persist / hydrate ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -807,6 +942,11 @@ export default function Cooking() {
   }
 
   // ── Computed ────────────────────────────────────────────────────────────────
+  const orderedWeekMeals = useMemo(() => {
+    const eatOut = WEEK_MEALS.find(m => m.eatOut)
+    const cookMeals = dayOrder.map(id => MEALS.find(m => m.id === id)).filter(Boolean)
+    return eatOut ? [...cookMeals, eatOut] : cookMeals
+  }, [dayOrder])
   const activeTimers = useMemo(() => {
     const list = []
     MEALS.forEach(m => m.steps.forEach((s, i) => { const t=timerStates[`${m.id}-${i}`]; if (t?.running) list.push({label:s.title,remaining:t.remaining}) }))
@@ -831,7 +971,7 @@ export default function Cooking() {
   // ── Recipe Card ─────────────────────────────────────────────────────────────
   const RecipeCard = ({ meal }) => {
     const isDone = mealDone.has(meal.id)
-    const isTonight = meal.day === todayDayName
+    const isTonight = meal.id === todayAssignedMealId
     const mealRating = Object.entries(ratings).find(([k]) => k.startsWith(`${meal.id}-`))?.[1]
     return (
       <div onClick={() => { setModalMeal(meal.id); setModalTab('steps') }}
@@ -867,8 +1007,8 @@ export default function Cooking() {
             <div style={{ fontSize:15, fontWeight:700, color:C.text }}>{todayMeal.title}</div>
             {todayMeal.eatOut && <div style={{ fontSize:12, color:C.dim, marginTop:2 }}>No cooking tonight — enjoy your date night!</div>}
           </div>
-          {!todayMeal.eatOut && todayMeal.mealId !== null && (
-            <button onClick={() => { setModalMeal(todayMeal.mealId); setModalTab('steps') }}
+          {!todayMeal.eatOut && todayAssignedMealId !== null && (
+            <button onClick={() => { setModalMeal(todayAssignedMealId); setModalTab('steps') }}
               style={{ padding:'8px 16px', borderRadius:8, border:'none', background:C.panel, color:'white', fontSize:13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }}>
               🍳 Start Cooking
             </button>
@@ -893,7 +1033,7 @@ export default function Cooking() {
       </div>
       <div style={{ fontSize:15, fontWeight:700, color:C.text, marginBottom:14 }}>This Week's Meals</div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(185px,1fr))', gap:14 }}>
-        {RECIPE_MEALS.map(m => <RecipeCard key={m.id} meal={m} />)}
+        {orderedWeekMeals.filter(m => !m.eatOut).map(m => <RecipeCard key={m.id} meal={m} />)}
       </div>
     </div>
   )
@@ -911,55 +1051,106 @@ export default function Cooking() {
 
   // ── Planner ──────────────────────────────────────────────────────────────────
   const PlannerView = () => {
-    const meal = selectedDay !== null ? WEEK_MEALS.find(m => m.id===selectedDay) : null
-    const isDone = meal ? mealDone.has(meal.id) : false
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday']
+    const selectedMeal = selectedDay !== null ? MEALS.find(m => m.id === selectedDay) : null
+    const isDone = selectedMeal ? mealDone.has(selectedMeal.id) : false
+
+    const handleDragStart = (idx) => setDragFromIdx(idx)
+    const handleDragEnd = () => { setDragFromIdx(null); setDragOver(null) }
+    const handleDragOver = (e, idx) => { e.preventDefault(); setDragOver(idx) }
+    const handleDrop = (e, toIdx) => {
+      e.preventDefault()
+      if (dragFromIdx === null || dragFromIdx === toIdx) { setDragFromIdx(null); setDragOver(null); return }
+      const newOrder = [...dayOrder]
+      ;[newOrder[dragFromIdx], newOrder[toIdx]] = [newOrder[toIdx], newOrder[dragFromIdx]]
+      setDayOrder(newOrder); saveDayOrder(newOrder)
+      setDragFromIdx(null); setDragOver(null)
+    }
+    const changeMealDay = (mealId, toIdx) => {
+      const fromIdx = dayOrder.indexOf(mealId)
+      if (fromIdx === -1 || fromIdx === toIdx) return
+      const newOrder = [...dayOrder]
+      ;[newOrder[fromIdx], newOrder[toIdx]] = [newOrder[toIdx], newOrder[fromIdx]]
+      setDayOrder(newOrder); saveDayOrder(newOrder)
+    }
+
+    const plannerRows = [
+      ...dayOrder.map((id, idx) => ({ meal: MEALS.find(m => m.id === id), slotIdx: idx, day: days[idx], locked: false })),
+      { meal: MEALS.find(m => m.id === 21), slotIdx: 4, day: 'Friday', locked: true },
+    ].filter(e => e.meal)
+
     return (
       <div>
-        <div style={{ fontSize:15, fontWeight:700, color:C.text, marginBottom:16 }}>Weekly Meal Plan</div>
+        <div style={{ fontSize:15, fontWeight:700, color:C.text, marginBottom:4 }}>Weekly Meal Plan</div>
+        <div style={{ fontSize:12, color:C.dim, marginBottom:16 }}>Drag meals to reorder days, or use the dropdown to reassign. Friday is always eating out.</div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
           <div style={{ ...card, overflow:'hidden' }}>
-            {WEEK_MEALS.map((m, idx) => {
-              const done = mealDone.has(m.id), tonight = m.day===todayDayName&&!m.eatOut, sel = selectedDay===m.id
+            {plannerRows.map(({ meal: m, slotIdx, day, locked }, listIdx) => {
+              const done = mealDone.has(m.id), tonight = m.id === todayAssignedMealId && !m.eatOut, sel = selectedDay === m.id
+              const isDragging = dragFromIdx === slotIdx, isDragTarget = !locked && dragOver === slotIdx
               return (
-                <div key={m.id} onClick={() => setSelectedDay(m.id)}
-                  style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 14px', borderBottom:idx<WEEK_MEALS.length-1?`1px solid ${C.border}`:'none', cursor:'pointer', background:sel?C.amberBg:m.eatOut?'#fffbeb':'white', transition:'background 0.1s' }}>
-                  <span style={{ fontSize:18, width:28, textAlign:'center' }}>{m.emoji}</span>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:600, color:C.text }}>{m.day}</div>
-                    <div style={{ fontSize:12, color:C.dim, marginTop:1 }}>{m.title}</div>
+                <div key={m.id}
+                  draggable={!locked}
+                  onDragStart={() => !locked && handleDragStart(slotIdx)}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={e => !locked && handleDragOver(e, slotIdx)}
+                  onDrop={e => !locked && handleDrop(e, slotIdx)}
+                  onClick={() => setSelectedDay(m.id)}
+                  style={{
+                    display:'flex', alignItems:'center', gap:10, padding:'11px 14px',
+                    borderBottom: listIdx < plannerRows.length-1 ? `1px solid ${C.border}` : 'none',
+                    cursor: locked ? 'default' : 'grab',
+                    background: isDragTarget ? C.amberBg : sel ? '#fef9ee' : m.eatOut ? '#fffbeb' : 'white',
+                    opacity: isDragging ? 0.45 : 1,
+                    transition: 'background 0.1s, opacity 0.15s',
+                    borderLeft: isDragTarget ? `3px solid ${C.amber}` : '3px solid transparent',
+                  }}>
+                  {!locked && <span style={{ color:'#cbd5e1', fontSize:15, cursor:'grab', flexShrink:0, userSelect:'none' }}>⠿</span>}
+                  <span style={{ fontSize:18, width:26, textAlign:'center', flexShrink:0 }}>{m.emoji}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:C.text }}>{day}</div>
+                    <div style={{ fontSize:12, color:C.dim, marginTop:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.title}</div>
                   </div>
-                  {m.eatOut ? <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:'#fef3c7', color:C.amber }}>Eat Out</span>
-                   : done ? <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:C.greenBg, color:C.green }}>✓ Done</span>
-                   : tonight ? <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:C.amberBg, color:C.amber }}>Tonight</span>
-                   : <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:C.blueBg, color:C.blue }}>Upcoming</span>}
+                  {!locked && (
+                    <select value={slotIdx} onChange={e => { e.stopPropagation(); changeMealDay(m.id, parseInt(e.target.value)) }} onClick={e => e.stopPropagation()}
+                      style={{ fontSize:11, padding:'3px 5px', borderRadius:6, border:`1px solid ${C.border}`, background:'white', color:C.sub, cursor:'pointer', flexShrink:0 }}>
+                      {days.map((d, i) => <option key={i} value={i}>{d.slice(0,3)}</option>)}
+                    </select>
+                  )}
+                  {m.eatOut ? <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:'#fef3c7', color:C.amber, flexShrink:0 }}>Eat Out 🔒</span>
+                   : done ? <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:C.greenBg, color:C.green, flexShrink:0 }}>✓ Done</span>
+                   : tonight ? <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:C.amberBg, color:C.amber, flexShrink:0 }}>Tonight</span>
+                   : <span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99, background:C.blueBg, color:C.blue, flexShrink:0 }}>Upcoming</span>}
                 </div>
               )
             })}
           </div>
           <div style={card}>
             <div style={{ padding:'1.25rem' }}>
-              {!meal ? (
+              {!selectedMeal ? (
                 <div style={{ textAlign:'center', padding:'2.5rem 1rem', color:C.dim }}>
                   <div style={{ fontSize:28, marginBottom:8 }}>📅</div>
                   <div style={{ fontSize:14, fontWeight:500 }}>Select a day to view details</div>
                 </div>
-              ) : meal.eatOut ? (
+              ) : selectedMeal.eatOut ? (
                 <div style={{ textAlign:'center', padding:'2rem 1rem' }}>
-                  <div style={{ fontSize:52, marginBottom:12 }}>🎉</div>
+                  <div style={{ fontSize:52, marginBottom:12 }}>🍽️</div>
                   <div style={{ fontSize:18, fontWeight:700, color:C.amber, marginBottom:6 }}>Date Night — Eating Out!</div>
                   <div style={{ fontSize:13, color:C.dim, marginBottom:8 }}>Friday night — no cooking tonight!</div>
                   <div style={{ background:'#fffbeb', border:`1px solid rgba(245,158,11,0.3)`, borderRadius:10, padding:'10px 14px', fontSize:13, color:'#92400e' }}>🍽️ Go enjoy a nice dinner out together</div>
                 </div>
               ) : (
                 <>
-                  <div style={{ fontSize:11, fontWeight:600, color:C.dim, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4 }}>{meal.day}</div>
-                  <div style={{ fontSize:16, fontWeight:700, color:C.text, marginBottom:4 }}>{meal.title}</div>
-                  <div style={{ fontSize:12, color:C.sub, marginBottom:14 }}>{meal.desc}</div>
+                  <div style={{ fontSize:11, fontWeight:600, color:C.dim, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:4 }}>
+                    {days[dayOrder.indexOf(selectedMeal.id)] || selectedMeal.day}
+                  </div>
+                  <div style={{ fontSize:16, fontWeight:700, color:C.text, marginBottom:4 }}>{selectedMeal.title}</div>
+                  <div style={{ fontSize:12, color:C.sub, marginBottom:14 }}>{selectedMeal.desc}</div>
                   <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:C.dim, marginBottom:8 }}>Ingredients</div>
-                  {meal.ingredients.map((ing, j) => {
-                    const isOn = (mealIngChecked[meal.id]||new Set()).has(j)
+                  {selectedMeal.ingredients.map((ing, j) => {
+                    const isOn = (mealIngChecked[selectedMeal.id]||new Set()).has(j)
                     return (
-                      <div key={j} onClick={() => toggleIngChecked(meal.id, j)}
+                      <div key={j} onClick={() => toggleIngChecked(selectedMeal.id, j)}
                         style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderBottom:`1px solid ${C.border}`, cursor:'pointer' }}>
                         <div style={{ width:14, height:14, borderRadius:3, border:`1.5px solid ${isOn?C.green:C.borderMd}`, background:isOn?C.green:'white', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:9, color:'white' }}>{isOn?'✓':''}</div>
                         <span style={{ flex:1, fontSize:13, textDecoration:isOn?'line-through':'none', color:isOn?C.dim:C.text }}>{ing.name}</span>
@@ -967,9 +1158,9 @@ export default function Cooking() {
                       </div>
                     )
                   })}
-                  <button onClick={() => { setModalMeal(meal.id); setModalTab('steps') }}
+                  <button onClick={() => { setModalMeal(selectedMeal.id); setModalTab('steps') }}
                     style={{ width:'100%', marginTop:14, background:C.panel, color:'white', border:'none', padding:'10px 0', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>🍳 Open Full Recipe</button>
-                  <button onClick={() => toggleMealDone(meal.id)}
+                  <button onClick={() => toggleMealDone(selectedMeal.id)}
                     style={{ width:'100%', marginTop:8, background:isDone?'#f1f5f9':C.greenBg, color:isDone?C.dim:C.green, border:`1px solid ${isDone?C.border:'rgba(22,163,74,0.25)'}`, padding:'9px 0', borderRadius:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
                     {isDone ? '↩ Mark Incomplete' : '✓ Mark as Cooked'}
                   </button>
